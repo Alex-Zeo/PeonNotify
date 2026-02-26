@@ -72,6 +72,7 @@ Every Claude Code lifecycle event is wired to the dispatcher. The dispatcher rea
 | `PreToolUse` | `Task` | *"Work work"* | Subagent task starting |
 | `PostToolUse` | `Write\|Edit` | *"Jobs done"* | File write/edit completed |
 | `PostToolUse` | (on failure) | *"Never mind"* | Tool execution failed |
+| `PostToolUseFailure` | — | *"Leave me alone"* | System error |
 
 **Completion**
 
@@ -122,7 +123,7 @@ Place `.mp3` files in `~/.claude/sounds/peon/`. All 15 files referenced in confi
 | `hmmm.mp3` | "Hmmm?" | Permission prompts, idle notification |
 | `yes_what.mp3` | "Yes? What?" | Permission prompts |
 | `me_busy.mp3` | "Me busy" | Compaction |
-| `leave_me_alone.mp3` | "Leave me alone" | Limits |
+| `leave_me_alone.mp3` | "Leave me alone" | System errors |
 | `jobs_done.mp3` | "Jobs done!" | Step completion, subagent done, session end |
 | `work_complete.mp3` | "Work complete" | Full response complete (Stop) |
 | `more_gold_required.mp3` | "More gold is required" | Limits |

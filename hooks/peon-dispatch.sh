@@ -95,7 +95,7 @@ resolve_event_key() {
       ;;
 
     PostToolUseFailure)
-      echo "error"
+      echo "system_error"
       ;;
 
     Notification)
