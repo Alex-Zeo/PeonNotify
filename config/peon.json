@@ -23,7 +23,7 @@
     "subagent_stop":       ["jobs_done.mp3"],
     "compact_manual":      ["me_busy.mp3"],
     "compact_auto":        ["me_busy.mp3"],
-    "error":               ["leave_me_alone.mp3"],
+    "error":               ["leave_me_alone.mp3", "never_mind.mp3"],
     "limit":               ["more_gold_required.mp3"]
   },
 
