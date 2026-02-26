@@ -1,0 +1,39 @@
+{
+  "enabled": true,
+  "volume": 0.6,
+  "mute": false,
+  "cooldown_ms": 1500,
+  "log_level": "info",
+  "log_max_lines": 5000,
+  "sound_pack": "peon",
+  "platform_override": null,
+
+  "event_sounds": {
+    "session_start":       ["ready_to_work.mp3"],
+    "session_resume":      ["okie_dokey.mp3", "zug_zug.mp3"],
+    "session_end":         ["jobs_done.mp3"],
+    "prompt_submit":       ["work_work.mp3", "zug_zug.mp3", "ill_try.mp3", "be_happy_to.mp3", "okie_dokey.mp3", "something_need_doing.mp3"],
+    "tool_start":          ["work_work.mp3"],
+    "tool_done":           [],
+    "tool_write":          ["okie_dokey.mp3"],
+    "tool_bash":           [],
+    "permission_prompt":   ["something_need_doing.mp3", "hmmm.mp3", "yes_what.mp3"],
+    "idle_prompt":         ["me_busy.mp3", "leave_me_alone.mp3"],
+    "stop":                ["jobs_done.mp3", "work_complete.mp3"],
+    "subagent_stop":       ["zug_zug.mp3"],
+    "compact_manual":      ["work_complete.mp3"],
+    "compact_auto":        [],
+    "error":               ["more_gold_required.mp3", "never_mind.mp3"],
+    "limit":               ["more_gold_required.mp3"]
+  },
+
+  "event_cooldowns": {
+    "tool_start": 5000,
+    "tool_done": 5000,
+    "tool_bash": 10000,
+    "prompt_submit": 0,
+    "stop": 0,
+    "permission_prompt": 0,
+    "session_start": 0
+  }
+}
