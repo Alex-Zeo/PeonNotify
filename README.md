@@ -1,30 +1,30 @@
-# Peon Notify — Learn Claude Code Hooks the Fun Way
+# Peon Notify - Learn Claude Code Hooks the Fun Way
 
-> *"Ready to work!"* — A Warcraft Peon tells you what Claude is doing, so you don't have to watch the terminal.
+> *"Ready to work!"* - A Warcraft Peon tells you what Claude is doing, so you don't have to watch the terminal.
 
 ## Why Hooks Matter
 
-Claude Code **hooks** are lifecycle callbacks — shell commands that fire automatically when Claude starts a session, calls a tool, finishes a response, hits an error, or needs your approval. Every hook receives structured JSON on stdin describing exactly what happened.
+Claude Code **hooks** are lifecycle callbacks - shell commands that fire automatically when Claude starts a session, calls a tool, finishes a response, hits an error, or needs your approval. Every hook receives structured JSON on stdin describing exactly what happened.
 
 That simple contract unlocks real automation across disciplines:
 
-- **Software Engineering** — enforce lint/test gates before commits, auto-format files on write, block dangerous shell commands, trigger CI pipelines on task completion
-- **Data Engineering** — validate schemas before pipeline writes, log every query Claude runs against your warehouse, alert on long-running transforms, auto-snapshot tables before mutations
-- **Data Analysis** — capture every generated chart or SQL query to an audit trail, enforce notebook cell execution policies, notify Slack when an analysis run completes
-- **AI/ML** — log prompt/response pairs for evaluation datasets, enforce token budgets per session, gate model API calls behind approval hooks, track agent tool-use patterns for observability
+- **Software Engineering** - enforce lint/test gates before commits, auto-format files on write, block dangerous shell commands, trigger CI pipelines on task completion
+- **Data Engineering** - validate schemas before pipeline writes, log every query Claude runs against your warehouse, alert on long-running transforms, auto-snapshot tables before mutations
+- **Data Analysis** - capture every generated chart or SQL query to an audit trail, enforce notebook cell execution policies, notify Slack when an analysis run completes
+- **AI/ML** - log prompt/response pairs for evaluation datasets, enforce token budgets per session, gate model API calls behind approval hooks, track agent tool-use patterns for observability
 
-Hooks require no plugins and no Claude Code source changes — just shell scripts reacting to structured events.
+Hooks require no plugins and no Claude Code source changes - just shell scripts reacting to structured events.
 
 ## What This Project Does
 
-PeonNotify is a working hooks implementation that plays Warcraft Peon sound effects for every Claude Code event. It's a fun way to learn hooks end-to-end — JSON parsing, event routing, config-driven behavior, cooldown state, cross-platform audio — while giving you real-time audio awareness of your Claude session.
+PeonNotify is a working hooks implementation that plays Warcraft Peon sound effects for every Claude Code event. It's a fun way to learn hooks end-to-end - JSON parsing, event routing, config-driven behavior, cooldown state, cross-platform audio - while giving you real-time audio awareness of your Claude session.
 
-A single dispatcher script handles all events. It reads the JSON payload, maps the event to a sound category, checks per-event cooldowns, picks a random `.mp3` from config, and plays it asynchronously. All behavior is driven by one config file — changing sounds, volume, cooldowns, or disabling events requires zero code changes.
+A single dispatcher script handles all events. It reads the JSON payload, maps the event to a sound category, checks per-event cooldowns, picks a random `.mp3` from config, and plays it asynchronously. All behavior is driven by one config file - changing sounds, volume, cooldowns, or disabling events requires zero code changes.
 
 ```
 ~/.claude/
 ├── hooks/
-│   ├── peon-dispatch.sh        # Single entry point — all hooks route here
+│   ├── peon-dispatch.sh        # Single entry point - all hooks route here
 │   ├── peon-health.sh          # Diagnostics & validation
 │   └── lib/
 │       ├── config.sh           # Config loader, platform detection, cooldowns
@@ -57,17 +57,17 @@ Every Claude Code lifecycle event is wired to the dispatcher. The dispatcher rea
 
 | Hook Event | Matcher | Sound | When It Fires |
 |---|---|---|---|
-| `SessionStart` | — | *"Ready to work"* | New session begins |
+| `SessionStart` | - | *"Ready to work"* | New session begins |
 | `SessionStart` | `resume` | *"Okie dokey"* | Resumed session |
-| `SessionEnd` | — | *"Jobs done"* | Session closes |
+| `SessionEnd` | - | *"Jobs done"* | Session closes |
 
 **User interaction**
 
 | Hook Event | Matcher | Sound | When It Fires |
 |---|---|---|---|
-| `UserPromptSubmit` | — | *"Work work" / "Zug zug" / ...* | You send a prompt |
+| `UserPromptSubmit` | - | *"Work work" / "Zug zug" / ...* | You send a prompt |
 | `Notification` | `permission_prompt` | *"Something need doing?"* | Claude needs approval |
-| `PermissionRequest` | — | *"Something need doing?"* | Permission dialog shown |
+| `PermissionRequest` | - | *"Something need doing?"* | Permission dialog shown |
 | `Notification` | `idle_prompt` | *"Hmmm?"* | Idle >60s, waiting for input |
 
 **Tool use**
@@ -79,15 +79,15 @@ Every Claude Code lifecycle event is wired to the dispatcher. The dispatcher rea
 | `PreToolUse` | `Task` | *"Work work"* | Subagent task starting |
 | `PostToolUse` | `Write\|Edit` | *"Jobs done"* | File write/edit completed |
 | `PostToolUse` | (on failure) | *"Never mind"* | Tool execution failed |
-| `PostToolUseFailure` | — | *"Leave me alone"* | System error |
+| `PostToolUseFailure` | - | *"Leave me alone"* | System error |
 
 **Completion**
 
 | Hook Event | Matcher | Sound | When It Fires |
 |---|---|---|---|
-| `Stop` | — | *"Work complete"* | Agent finished full response |
-| `SubagentStop` | — | *"Jobs done"* | Subagent task completed |
-| `PreCompact` | — | *"Me busy"* | Compaction triggered (manual or auto) |
+| `Stop` | - | *"Work complete"* | Agent finished full response |
+| `SubagentStop` | - | *"Jobs done"* | Subagent task completed |
+| `PreCompact` | - | *"Me busy"* | Compaction triggered (manual or auto) |
 
 ## Configuration
 
@@ -140,10 +140,10 @@ Extract from Warcraft III game files with CascView, download from soundboard sit
 
 ## Troubleshooting
 
-- **No sound plays** — Run `~/.claude/hooks/peon-health.sh --play-test`, verify `enabled: true` and `mute: false` in config, check that `.mp3` files exist in `~/.claude/sounds/peon/`
-- **Sounds play too often** — Increase `cooldown_ms` or set per-event cooldowns in `event_cooldowns`; set noisy events to `[]` in `event_sounds`
-- **Hooks not firing** — Run `/hooks` in Claude Code to verify registration; check that `~/.claude/settings.local.json` references `peon-dispatch.sh`
-- **Wrong platform detected** — Set `"platform_override": "macos"` (or `"linux"`, `"wsl"`) in config
+- **No sound plays** - Run `~/.claude/hooks/peon-health.sh --play-test`, verify `enabled: true` and `mute: false` in config, check that `.mp3` files exist in `~/.claude/sounds/peon/`
+- **Sounds play too often** - Increase `cooldown_ms` or set per-event cooldowns in `event_cooldowns`; set noisy events to `[]` in `event_sounds`
+- **Hooks not firing** - Run `/hooks` in Claude Code to verify registration; check that `~/.claude/settings.local.json` references `peon-dispatch.sh`
+- **Wrong platform detected** - Set `"platform_override": "macos"` (or `"linux"`, `"wsl"`) in config
 
 ## Uninstall
 
