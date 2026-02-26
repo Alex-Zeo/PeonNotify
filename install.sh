@@ -142,7 +142,7 @@ else
     if [[ -f "${SOUNDS_TARGET}/${sf}" ]]; then
       _skip "$sf"
     else
-      ((MISSING_COUNT++))
+      (( ++MISSING_COUNT ))
     fi
   done
 
@@ -221,10 +221,10 @@ if [[ -f "$SETTINGS_FILE" ]]; then
   fi
 else
   if $DRY_RUN; then
-    _log "[dry-run] cp settings.local.json"
+    _log "[dry-run] sed '\$HOME' → '${HOME}' in settings.local.json → $SETTINGS_FILE"
   else
-    cp "${INSTALLER_DIR}/settings.local.json" "$SETTINGS_FILE"
-    _ok "settings.local.json installed"
+    sed 's|\$HOME|'"${HOME}"'|g' "${INSTALLER_DIR}/settings.local.json" > "$SETTINGS_FILE"
+    _ok "settings.local.json installed (paths expanded)"
   fi
 fi
 

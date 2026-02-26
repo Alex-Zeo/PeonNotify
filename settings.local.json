@@ -131,17 +131,6 @@
 
     "PreCompact": [
       {
-        "matcher": "manual",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/hooks/peon-dispatch.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "auto",
         "hooks": [
           {
             "type": "command",

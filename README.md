@@ -1,8 +1,18 @@
-# 🔨 Peon Notify — Claude Code Sound Notification System
+# Peon Notify — Sound Notifications for Claude Code
 
-> *"Ready to work!"* — A production-grade audio notification system for Claude Code CLI that keeps you informed of session status, progress, errors, and completions without watching the terminal.
+> *"Ready to work!"* — Audio feedback for every Claude Code lifecycle event, so you never have to watch the terminal.
 
-## Architecture
+## What Are Claude Code Hooks?
+
+Claude Code **hooks** are lifecycle callbacks that let you run shell commands at key moments during an AI coding session. Every hook receives a JSON payload on stdin describing the event — session starts, tool calls, completions, permission prompts, and more.
+
+Hooks are configured in `~/.claude/settings.local.json` under a `"hooks"` key. Each event name maps to an array of matchers, each with a `command` string that runs as a subprocess. The JSON payload always includes `hook_event_name` and `session_id`; tool-related events add `tool_name`, and notifications include `notification_type`.
+
+This makes hooks a clean extension point — no Claude Code source changes, no plugins, just shell scripts reacting to structured events.
+
+## How PeonNotify Uses Hooks
+
+PeonNotify registers a single dispatcher script (`peon-dispatch.sh`) as the command for every hook event. The dispatcher reads the JSON payload, maps the event to a sound category, checks per-event cooldowns, resolves a random `.mp3` from the configured list, and plays it asynchronously. All behavior is driven by one config file (`peon.json`) — changing sounds, volume, cooldowns, or disabling events requires zero code changes.
 
 ```
 ~/.claude/
@@ -24,82 +34,52 @@
 └── settings.local.json         # Claude Code hook wiring
 ```
 
-**Design principles applied:**
-- **Modular** — each `.sh` in `lib/` owns one responsibility
-- **Config-over-Code** — all behavior controlled via `peon.json`, zero code changes needed
-- **Structured Logging** — JSON-per-line with session_id, event, timestamps (wide events pattern)
-- **Fail Fast** — invalid state exits immediately; missing sounds skip gracefully
-- **Idempotent** — installer and dispatcher are safe to run repeatedly
-- **Cross-Platform** — auto-detects macOS (`afplay`), Linux (`paplay`/`aplay`/`mpv`), WSL (`powershell.exe`)
-
-## Installation
+## Quick Start
 
 ```bash
-git clone <this-repo> ~/peon-notify
-cd ~/peon-notify
-chmod +x install.sh
-./install.sh
+git clone <this-repo> ~/PeonNotify
+cd ~/PeonNotify && ./install.sh
+# Add .mp3 files to ~/.claude/sounds/peon/, then restart Claude Code
 ```
 
-Flags:
-- `--skip-sounds` — Install everything except sound downloads
-- `--dry-run` — Preview what would change without touching disk
-
-## Hook Event Coverage
+## Event Coverage
 
 Every Claude Code lifecycle event is wired to the dispatcher. The dispatcher reads the JSON payload on stdin, resolves the event to a sound category, checks cooldowns, and plays asynchronously.
 
-| Hook Event | Matcher | Sound Category | When It Fires |
+**Session lifecycle**
+
+| Hook Event | Matcher | Sound | When It Fires |
 |---|---|---|---|
-| `SessionStart` | `startup` | `session_start` | New session begins — *"Ready to work"* |
-| `SessionStart` | `resume` | `session_resume` | Resumed session — *"Okie dokey"* |
-| `SessionEnd` | — | `session_end` | Session closes — *"Jobs done"* |
-| `UserPromptSubmit` | — | `prompt_submit` | You send a prompt — *"Work work" / "Zug zug" / ...* |
-| `PreToolUse` | `Bash` | `tool_bash` | Shell command about to run |
-| `PreToolUse` | `Write\|Edit` | `tool_write` | File write/edit starting — *"Okie dokey"* |
-| `PreToolUse` | `Task` | `tool_start` | Subagent task starting — *"Work work"* |
-| `PostToolUse` | `Write\|Edit` | `tool_done` | File write/edit completed |
-| `PostToolUse` | (on failure) | `error` | Tool execution failed — *"Never mind"* |
-| `Notification` | `permission_prompt` | `permission_prompt` | Claude needs approval — *"Something need doing?"* |
-| `Notification` | `idle_prompt` | `idle_prompt` | Idle >60s, waiting for input — *"Me busy"* |
-| `PermissionRequest` | — | `permission_prompt` | Permission dialog shown — *"Hmmm?"* |
-| `Stop` | — | `stop` | Agent finished responding — *"Jobs done!"* |
-| `SubagentStop` | — | `subagent_stop` | Subagent task completed — *"Zug zug"* |
-| `PreCompact` | `manual` | `compact_manual` | Manual `/compact` — *"Work complete"* |
-| `PreCompact` | `auto` | `compact_auto` | Auto-compaction (silent by default) |
+| `SessionStart` | — | *"Ready to work"* | New session begins |
+| `SessionStart` | `resume` | *"Okie dokey"* | Resumed session |
+| `SessionEnd` | — | *"Jobs done"* | Session closes |
 
-## Sound Files
+**User interaction**
 
-Place `.mp3` files in `~/.claude/sounds/peon/`. All 15 files referenced in config:
+| Hook Event | Matcher | Sound | When It Fires |
+|---|---|---|---|
+| `UserPromptSubmit` | — | *"Work work" / "Zug zug" / ...* | You send a prompt |
+| `Notification` | `permission_prompt` | *"Something need doing?"* | Claude needs approval |
+| `PermissionRequest` | — | *"Something need doing?"* | Permission dialog shown |
+| `Notification` | `idle_prompt` | *"Hmmm?"* | Idle >60s, waiting for input |
 
-| File | Peon Quote | Used For |
-|---|---|---|
-| `ready_to_work.mp3` | "Ready to work" | Session start |
-| `okie_dokey.mp3` | "Okie dokey" | Prompt ack, resume, file writes |
-| `zug_zug.mp3` | "Zug zug" | Prompt ack, subagent completion |
-| `work_work.mp3` | "Work work" | Prompt ack, tool start |
-| `ill_try.mp3` | "I'll try" | Prompt ack |
-| `be_happy_to.mp3` | "Be happy to" | Prompt ack |
-| `something_need_doing.mp3` | "Something need doing?" | Permission prompts |
-| `hmmm.mp3` | "Hmmm?" | Permission prompts |
-| `yes_what.mp3` | "Yes? What?" | Permission prompts |
-| `me_busy.mp3` | "Me busy" | Idle notification |
-| `leave_me_alone.mp3` | "Leave me alone" | Idle notification |
-| `jobs_done.mp3` | "Jobs done!" | Completion, session end |
-| `work_complete.mp3` | "Work complete" | Completion, compaction |
-| `more_gold_required.mp3` | "More gold is required" | Errors, limits |
-| `never_mind.mp3` | "Never mind" | Tool failures |
+**Tool use**
 
-### Sourcing sounds
+| Hook Event | Matcher | Sound | When It Fires |
+|---|---|---|---|
+| `PreToolUse` | `Bash` | *(silent)* | Shell command about to run |
+| `PreToolUse` | `Write\|Edit` | *"Work work"* | File write/edit starting |
+| `PreToolUse` | `Task` | *"Work work"* | Subagent task starting |
+| `PostToolUse` | `Write\|Edit` | *"Jobs done"* | File write/edit completed |
+| `PostToolUse` | (on failure) | *"Never mind"* | Tool execution failed |
 
-**Option A — WC3 game rip** (best quality): Use CascView on your Warcraft III install → `Sound/Orc/Peon/` → export WAVs → convert:
-```bash
-for f in *.wav; do ffmpeg -i "$f" -q:a 5 "${f%.wav}.mp3"; done
-```
+**Completion**
 
-**Option B — Soundboard sites**: 101soundboards.com/boards/warcraft-iii-orc-peon, myinstants.com
-
-**Option C — TTS placeholders** (for testing): The installer prints a script that generates robot-voice stand-ins via `say` (macOS) or `espeak` (Linux).
+| Hook Event | Matcher | Sound | When It Fires |
+|---|---|---|---|
+| `Stop` | — | *"Work complete"* | Agent finished full response |
+| `SubagentStop` | — | *"Jobs done"* | Subagent task completed |
+| `PreCompact` | — | *"Me busy"* | Compaction triggered (manual or auto) |
 
 ## Configuration
 
@@ -115,101 +95,47 @@ Edit `~/.claude/config/peon.json`:
   "sound_pack": "peon",     // Subdirectory under sounds/
 
   "event_sounds": {         // Map event keys → array of MP3 filenames
-    "stop": ["jobs_done.mp3", "work_complete.mp3"],
-    // Empty array = silent for that event
-    "tool_bash": [],
-    // ...
+    "stop": ["work_complete.mp3"],
+    "tool_bash": [],        // Empty array = silent for that event
   },
 
   "event_cooldowns": {      // Override cooldown per event (ms)
-    "tool_start": 5000,     // Don't spam during rapid tool calls
+    "tool_start": 5000,
     "prompt_submit": 0,     // Always play on prompt
-    // ...
   }
 }
 ```
 
-### Quick recipes
+## Sound Files
 
-**Mute everything:**
-```bash
-jq '.mute = true' ~/.claude/config/peon.json > /tmp/p.json && mv /tmp/p.json ~/.claude/config/peon.json
-```
+Place `.mp3` files in `~/.claude/sounds/peon/`. All 15 files referenced in config:
 
-**Lower volume:**
-```bash
-jq '.volume = 0.3' ~/.claude/config/peon.json > /tmp/p.json && mv /tmp/p.json ~/.claude/config/peon.json
-```
+| File | Peon Quote | Used For |
+|---|---|---|
+| `ready_to_work.mp3` | "Ready to work" | Session start |
+| `okie_dokey.mp3` | "Okie dokey" | Prompt ack, resume, file writes |
+| `zug_zug.mp3` | "Zug zug" | Prompt ack |
+| `work_work.mp3` | "Work work" | Prompt ack, tool start |
+| `ill_try.mp3` | "I'll try" | Prompt ack |
+| `be_happy_to.mp3` | "Be happy to" | Prompt ack |
+| `something_need_doing.mp3` | "Something need doing?" | Permission prompts |
+| `hmmm.mp3` | "Hmmm?" | Permission prompts, idle notification |
+| `yes_what.mp3` | "Yes? What?" | Permission prompts |
+| `me_busy.mp3` | "Me busy" | Compaction |
+| `leave_me_alone.mp3` | "Leave me alone" | *(available for custom use)* |
+| `jobs_done.mp3` | "Jobs done!" | Step completion, subagent done, session end |
+| `work_complete.mp3` | "Work complete" | Full response complete (Stop) |
+| `more_gold_required.mp3` | "More gold is required" | Errors, limits |
+| `never_mind.mp3` | "Never mind" | Tool failures |
 
-**Silence a noisy event:**
-```bash
-jq '.event_sounds.tool_start = []' ~/.claude/config/peon.json > /tmp/p.json && mv /tmp/p.json ~/.claude/config/peon.json
-```
-
-**Add a custom sound pack:**
-```bash
-mkdir -p ~/.claude/sounds/halo
-# Add your sounds...
-jq '.sound_pack = "halo"' ~/.claude/config/peon.json > /tmp/p.json && mv /tmp/p.json ~/.claude/config/peon.json
-```
-
-## Observability
-
-### Structured logs
-
-Every sound play emits a JSON line to `~/.claude/logs/peon.log`:
-
-```json
-{"ts":"2026-02-26T15:30:00.000Z","level":"info","event":"dispatch.play","session_id":"abc123","pid":42,"event_key":"stop","hook_event":"Stop","tool_name":"","sound":"jobs_done.mp3"}
-```
-
-Fields follow the **wide event** pattern — one rich event per action with high-cardinality identifiers (session_id, pid) for precise filtering.
-
-**Query recent events:**
-```bash
-# Last 20 plays
-tail -20 ~/.claude/logs/peon.log | jq .
-
-# Errors only
-grep '"level":"error"' ~/.claude/logs/peon.log | jq .
-
-# Events for a specific session
-grep 'abc123' ~/.claude/logs/peon.log | jq .
-
-# Count by event type
-jq -r '.event_key' ~/.claude/logs/peon.log | sort | uniq -c | sort -rn
-```
-
-Logs auto-rotate at 5000 lines (configurable via `log_max_lines`).
-
-### Health check
-
-```bash
-~/.claude/hooks/peon-health.sh            # Full diagnostic
-~/.claude/hooks/peon-health.sh --play-test # Also test audio playback
-~/.claude/hooks/peon-health.sh --fix       # Auto-fix permissions
-```
+Extract from Warcraft III game files with CascView, download from soundboard sites (101soundboards.com, myinstants.com), or use the placeholder TTS script printed by the installer.
 
 ## Troubleshooting
 
-**No sound plays:**
-1. Run `~/.claude/hooks/peon-health.sh --play-test`
-2. Check `~/.claude/config/peon.json` → `enabled: true`, `mute: false`
-3. Verify sound files exist in `~/.claude/sounds/peon/`
-4. Check logs: `tail ~/.claude/logs/peon.log | jq .`
-
-**Sounds play too often:**
-- Increase `cooldown_ms` in config (default 1500ms)
-- Set per-event cooldowns in `event_cooldowns` (e.g., `"tool_start": 10000`)
-- Set noisy events to `[]` in `event_sounds`
-
-**Hooks not firing:**
-- Run `/hooks` in Claude Code to verify registration
-- Check `~/.claude/settings.local.json` references `peon-dispatch.sh`
-- Run `claude --debug` to see hook execution traces
-
-**Wrong platform detected:**
-- Set `"platform_override": "macos"` (or `"linux"`, `"wsl"`) in config
+- **No sound plays** — Run `~/.claude/hooks/peon-health.sh --play-test`, verify `enabled: true` and `mute: false` in config, check that `.mp3` files exist in `~/.claude/sounds/peon/`
+- **Sounds play too often** — Increase `cooldown_ms` or set per-event cooldowns in `event_cooldowns`; set noisy events to `[]` in `event_sounds`
+- **Hooks not firing** — Run `/hooks` in Claude Code to verify registration; check that `~/.claude/settings.local.json` references `peon-dispatch.sh`
+- **Wrong platform detected** — Set `"platform_override": "macos"` (or `"linux"`, `"wsl"`) in config
 
 ## Uninstall
 
@@ -224,4 +150,4 @@ rm -rf ~/.claude/logs/peon.log
 
 ---
 
-*Zug zug!* 🔨
+*Zug zug!*

@@ -19,9 +19,9 @@ PASS=0
 FAIL=0
 WARN=0
 
-_pass() { echo "  ✅ $1"; ((PASS++)); }
-_fail() { echo "  ❌ $1"; ((FAIL++)); }
-_warn() { echo "  ⚠️  $1"; ((WARN++)); }
+_pass() { echo "  ✅ $1"; (( ++PASS )); }
+_fail() { echo "  ❌ $1"; (( ++FAIL )); }
+_warn() { echo "  ⚠️  $1"; (( ++WARN )); }
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
@@ -84,9 +84,9 @@ MISSING=0
 MISSING_FILES=()
 for sound in "${EXPECTED_SOUNDS[@]}"; do
   if [[ -f "${SOUNDS_DIR}/${sound}" ]]; then
-    ((FOUND++))
+    (( ++FOUND ))
   else
-    ((MISSING++))
+    (( ++MISSING ))
     MISSING_FILES+=("$sound")
   fi
 done
