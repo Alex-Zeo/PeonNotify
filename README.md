@@ -1,18 +1,25 @@
-# Peon Notify — Sound Notifications for Claude Code
+# Peon Notify — Learn Claude Code Hooks the Fun Way
 
-> *"Ready to work!"* — Audio feedback for every Claude Code lifecycle event, so you never have to watch the terminal.
+> *"Ready to work!"* — A Warcraft Peon tells you what Claude is doing, so you don't have to watch the terminal.
 
-## What Are Claude Code Hooks?
+## Why Hooks Matter
 
-Claude Code **hooks** are lifecycle callbacks that let you run shell commands at key moments during an AI coding session. Every hook receives a JSON payload on stdin describing the event — session starts, tool calls, completions, permission prompts, and more.
+Claude Code **hooks** are lifecycle callbacks — shell commands that fire automatically when Claude starts a session, calls a tool, finishes a response, hits an error, or needs your approval. Every hook receives structured JSON on stdin describing exactly what happened.
 
-Hooks are configured in `~/.claude/settings.local.json` under a `"hooks"` key. Each event name maps to an array of matchers, each with a `command` string that runs as a subprocess. The JSON payload always includes `hook_event_name` and `session_id`; tool-related events add `tool_name`, and notifications include `notification_type`.
+That simple contract unlocks real automation across disciplines:
 
-This makes hooks a clean extension point — no Claude Code source changes, no plugins, just shell scripts reacting to structured events.
+- **Software Engineering** — enforce lint/test gates before commits, auto-format files on write, block dangerous shell commands, trigger CI pipelines on task completion
+- **Data Engineering** — validate schemas before pipeline writes, log every query Claude runs against your warehouse, alert on long-running transforms, auto-snapshot tables before mutations
+- **Data Analysis** — capture every generated chart or SQL query to an audit trail, enforce notebook cell execution policies, notify Slack when an analysis run completes
+- **AI/ML** — log prompt/response pairs for evaluation datasets, enforce token budgets per session, gate model API calls behind approval hooks, track agent tool-use patterns for observability
 
-## How PeonNotify Uses Hooks
+Hooks require no plugins and no Claude Code source changes — just shell scripts reacting to structured events.
 
-PeonNotify registers a single dispatcher script (`peon-dispatch.sh`) as the command for every hook event. The dispatcher reads the JSON payload, maps the event to a sound category, checks per-event cooldowns, resolves a random `.mp3` from the configured list, and plays it asynchronously. All behavior is driven by one config file (`peon.json`) — changing sounds, volume, cooldowns, or disabling events requires zero code changes.
+## What This Project Does
+
+PeonNotify is a working hooks implementation that plays Warcraft Peon sound effects for every Claude Code event. It's a fun way to learn hooks end-to-end — JSON parsing, event routing, config-driven behavior, cooldown state, cross-platform audio — while giving you real-time audio awareness of your Claude session.
+
+A single dispatcher script handles all events. It reads the JSON payload, maps the event to a sound category, checks per-event cooldowns, picks a random `.mp3` from config, and plays it asynchronously. All behavior is driven by one config file — changing sounds, volume, cooldowns, or disabling events requires zero code changes.
 
 ```
 ~/.claude/
