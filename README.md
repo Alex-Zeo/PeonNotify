@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/PeonNotify.png" alt="PeonNotify" width="600">
+</p>
+
 # Peon Notify - Learn Claude Code Hooks the Fun Way
 
 > *"Ready to work!"* - A Warcraft Peon tells you what Claude is doing, so you don't have to watch the terminal.
