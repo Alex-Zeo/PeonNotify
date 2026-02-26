@@ -71,7 +71,7 @@ Every Claude Code lifecycle event is wired to the dispatcher. The dispatcher rea
 | `PreToolUse` | `Write\|Edit` | *"Work work"* | File write/edit starting |
 | `PreToolUse` | `Task` | *"Work work"* | Subagent task starting |
 | `PostToolUse` | `Write\|Edit` | *"Jobs done"* | File write/edit completed |
-| `PostToolUse` | (on failure) | *"Leave me alone" / "Never mind"* | Tool execution failed |
+| `PostToolUse` | (on failure) | *"Never mind"* | Tool execution failed |
 
 **Completion**
 
@@ -122,11 +122,11 @@ Place `.mp3` files in `~/.claude/sounds/peon/`. All 15 files referenced in confi
 | `hmmm.mp3` | "Hmmm?" | Permission prompts, idle notification |
 | `yes_what.mp3` | "Yes? What?" | Permission prompts |
 | `me_busy.mp3` | "Me busy" | Compaction |
-| `leave_me_alone.mp3` | "Leave me alone" | Tool failures |
+| `leave_me_alone.mp3` | "Leave me alone" | Limits |
 | `jobs_done.mp3` | "Jobs done!" | Step completion, subagent done, session end |
 | `work_complete.mp3` | "Work complete" | Full response complete (Stop) |
 | `more_gold_required.mp3` | "More gold is required" | Limits |
-| `never_mind.mp3` | "Never mind" | Tool failures |
+| `never_mind.mp3` | "Never mind" | Tool failures (errors) |
 
 Extract from Warcraft III game files with CascView, download from soundboard sites (101soundboards.com, myinstants.com), or use the placeholder TTS script printed by the installer.
 
