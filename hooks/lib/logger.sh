@@ -61,5 +61,5 @@ peon_log() {
   echo "$json" >> "$PEON_LOG_FILE" 2>/dev/null
 
   # Rotate periodically (1 in 20 chance to avoid overhead)
-  (( RANDOM % 20 == 0 )) && _rotate_log
+  if (( RANDOM % 20 == 0 )); then _rotate_log; fi
 }
