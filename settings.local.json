@@ -79,6 +79,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/peon-codeguard.sh",
+            "timeout": 30
+          }
+        ]
       }
     ],
 

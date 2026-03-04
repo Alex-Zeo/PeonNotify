@@ -25,7 +25,20 @@
     "compact_auto":        ["me_busy.mp3"],
     "error":               ["never_mind.mp3"],
     "system_error":        ["leave_me_alone.mp3"],
-    "limit":               ["more_gold_required.mp3"]
+    "limit":               ["more_gold_required.mp3"],
+    "codeguard_pass":      ["jobs_done.mp3"],
+    "codeguard_lint_fail": ["never_mind.mp3"],
+    "codeguard_error":     ["leave_me_alone.mp3"]
+  },
+
+  "codeguard": {
+    "enabled": true,
+    "lint_enabled": true,
+    "claude_debug_enabled": true,
+    "claude_debug_model": "sonnet",
+    "skip_extensions": [".md", ".json", ".yaml", ".yml", ".toml", ".txt", ".csv", ".lock", ".svg", ".png", ".jpg", ".gif", ".ico", ".woff", ".woff2", ".eot", ".ttf"],
+    "lint_timeout_sec": 5,
+    "debug_timeout_sec": 20
   },
 
   "event_cooldowns": {

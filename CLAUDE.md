@@ -5,13 +5,25 @@ Audio notification system for Claude Code CLI. Plays Warcraft Peon sound clips i
 ## Architecture
 
 ```
-peon-dispatch.sh  (entry point — registered for every hook event)
-  ├── lib/config.sh   (config loading, platform detection, cooldown state, sound resolution)
-  ├── lib/logger.sh   (structured JSON logging with rotation)
-  └── lib/player.sh   (cross-platform async audio playback)
+peon-dispatch.sh     (entry point — registered for every hook event)
+  ├── lib/config.sh    (config loading, platform detection, cooldown state, sound resolution)
+  ├── lib/logger.sh    (structured JSON logging with rotation)
+  └── lib/player.sh    (cross-platform audio playback with queue)
+
+peon-codeguard.sh    (PostToolUse hook — code quality pipeline)
+  ├── lib/config.sh    (shared config loader)
+  ├── lib/logger.sh    (shared logging)
+  ├── lib/linter.sh    (language detection & linter dispatch)
+  └── lib/player.sh    (sound feedback on pass/fail)
 ```
 
-Flow: Claude Code fires hook → dispatch reads JSON from stdin → extracts `hook_event_name` + metadata → `resolve_event_key()` maps to sound category → checks cooldown → `peon_resolve_sound()` picks random MP3 → `peon_play()` runs audio player in background.
+### Dispatch Flow
+Claude Code fires hook → dispatch reads JSON from stdin → extracts `hook_event_name` + metadata → `resolve_event_key()` maps to sound category → checks cooldown → `peon_resolve_sound()` picks random MP3 → `peon_play()` enqueues sound → background drainer plays sequentially.
+
+### CodeGuard Flow
+Claude writes/edits file → `peon-codeguard.sh` receives PostToolUse JSON on stdin → extracts `tool_input.file_path` → skips non-code extensions → Step 1: `peon_run_linter()` detects language and runs appropriate linter → if lint passes, Step 2: calls `claude -p` with code review prompt → plays `codeguard_pass`, `codeguard_lint_fail`, or `codeguard_error` sound.
+
+**Important**: The `claude -p` call must run with `unset CLAUDECODE` to avoid Claude Code detecting a nested invocation and refusing to run.
 
 Config lives in `~/.claude/config/peon.json`. Hook wiring lives in `~/.claude/settings.local.json`.
 
@@ -31,6 +43,11 @@ Standard fields on every event: `hook_event_name`, `session_id`. Additional fiel
 - `SessionStart`: `source` (`resume` vs startup)
 - `PreCompact`: `trigger` (`manual`, `auto`)
 - `PermissionRequest`: `tool_name`
+
+### CodeGuard-specific fields used
+- `PostToolUse` → `tool_input.file_path`: absolute path to the written/edited file
+- CodeGuard reads `codeguard.*` keys from `peon.json` for all its settings
+- The `unset CLAUDECODE` before `claude -p` is required — without it, the Claude CLI detects it's running inside another Claude Code session and exits
 
 ### Testing hooks manually
 ```bash

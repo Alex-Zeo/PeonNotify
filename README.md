@@ -29,11 +29,13 @@ A single dispatcher script handles all events. It reads the JSON payload, maps t
 ~/.claude/
 ├── hooks/
 │   ├── peon-dispatch.sh        # Single entry point - all hooks route here
+│   ├── peon-codeguard.sh       # Code quality pipeline (lint + debug review)
 │   ├── peon-health.sh          # Diagnostics & validation
 │   └── lib/
 │       ├── config.sh           # Config loader, platform detection, cooldowns
+│       ├── linter.sh           # Language detection & linter dispatch
 │       ├── logger.sh           # Structured JSON logging (wide events)
-│       └── player.sh           # Cross-platform audio playback engine
+│       └── player.sh           # Cross-platform audio playback engine (queued)
 ├── config/
 │   └── peon.json               # All tunables (volume, mute, sounds, cooldowns)
 ├── sounds/
@@ -93,6 +95,34 @@ Every Claude Code lifecycle event is wired to the dispatcher. The dispatcher rea
 | `SubagentStop` | - | *"Jobs done"* | Subagent task completed |
 | `PreCompact` | - | *"Me busy"* | Compaction triggered (manual or auto) |
 
+**CodeGuard**
+
+| Hook Event | Matcher | Sound | When It Fires |
+|---|---|---|---|
+| `PostToolUse` | `Write\|Edit` | *"Jobs done"* | Lint + debug review passed |
+| `PostToolUse` | `Write\|Edit` | *"Never mind"* | Lint errors found |
+| `PostToolUse` | `Write\|Edit` | *"Leave me alone"* | Debug review found issues |
+
+## CodeGuard Pipeline
+
+`peon-codeguard.sh` is a separate `PostToolUse` hook that runs a two-step code quality pipeline whenever Claude writes or edits a file:
+
+1. **Language-aware lint** — Detects the file language by extension and runs the appropriate linter:
+   - JavaScript/TypeScript → `eslint`
+   - Python → `ruff` (fallback: `flake8`)
+   - Shell → `shellcheck`
+   - Go → `go vet`
+   - Ruby → `rubocop`
+   - Rust → `cargo clippy`
+
+2. **Claude debug review** — If lint passes, calls `claude -p` (Claude CLI in pipe mode) with a concise code review prompt. Only reports actual bugs, security issues, or logic errors — not style suggestions.
+
+**Skip logic**: Non-code files (`.md`, `.json`, `.yaml`, `.toml`, `.txt`, `.csv`, `.lock`, image/font files) are skipped automatically. The skip list is configurable.
+
+**Sound events**: `codeguard_pass` (clean), `codeguard_lint_fail` (lint errors), `codeguard_error` (debug review found issues).
+
+Both steps have independent timeouts and can be individually enabled/disabled in config.
+
 ## Configuration
 
 Edit `~/.claude/config/peon.json`:
@@ -114,6 +144,16 @@ Edit `~/.claude/config/peon.json`:
   "event_cooldowns": {      // Override cooldown per event (ms)
     "tool_start": 5000,
     "prompt_submit": 0,     // Always play on prompt
+  },
+
+  "codeguard": {            // Code quality pipeline settings
+    "enabled": true,        // Master switch for CodeGuard
+    "lint_enabled": true,   // Run language-aware lint
+    "claude_debug_enabled": true,  // Run Claude debug review
+    "claude_debug_model": "sonnet", // Model for debug review
+    "skip_extensions": [".md", ".json", ".yaml", "..."],  // Skip non-code files
+    "lint_timeout_sec": 5,  // Per-file lint timeout
+    "debug_timeout_sec": 20 // Per-file debug review timeout
   }
 }
 ```
@@ -148,6 +188,10 @@ Extract from Warcraft III game files with CascView, download from soundboard sit
 - **Sounds play too often** - Increase `cooldown_ms` or set per-event cooldowns in `event_cooldowns`; set noisy events to `[]` in `event_sounds`
 - **Hooks not firing** - Run `/hooks` in Claude Code to verify registration; check that `~/.claude/settings.local.json` references `peon-dispatch.sh`
 - **Wrong platform detected** - Set `"platform_override": "macos"` (or `"linux"`, `"wsl"`) in config
+- **CodeGuard not running** - Check `codeguard.enabled` is `true` in `peon.json`; verify `peon-codeguard.sh` is in `settings.local.json` PostToolUse hooks; run `peon-health.sh` to see CodeGuard status
+- **Lint errors not showing** - Ensure the linter is installed (e.g., `eslint`, `ruff`, `shellcheck`); check `codeguard.lint_enabled` is `true`
+- **Debug review timing out** - Increase `codeguard.debug_timeout_sec` (default: 20); check that `claude` CLI is available
+- **Sounds overlap** - The queue system in `player.sh` prevents this; if it happens, delete stale lock files in `~/.claude/state/` (`sound_queue.lk`, `sound_player.lk`)
 
 ## Uninstall
 

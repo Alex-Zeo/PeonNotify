@@ -19,9 +19,9 @@ PASS=0
 FAIL=0
 WARN=0
 
-_pass() { echo "  ✅ $1"; (( ++PASS )); }
-_fail() { echo "  ❌ $1"; (( ++FAIL )); }
-_warn() { echo "  ⚠️  $1"; (( ++WARN )); }
+_pass() { echo "  ✅ $1"; PASS=$((PASS + 1)); }
+_fail() { echo "  ❌ $1"; FAIL=$((FAIL + 1)); }
+_warn() { echo "  ⚠️  $1"; WARN=$((WARN + 1)); }
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
@@ -84,9 +84,9 @@ MISSING=0
 MISSING_FILES=()
 for sound in "${EXPECTED_SOUNDS[@]}"; do
   if [[ -f "${SOUNDS_DIR}/${sound}" ]]; then
-    (( ++FOUND ))
+    FOUND=$((FOUND + 1))
   else
-    (( ++MISSING ))
+    MISSING=$((MISSING + 1))
     MISSING_FILES+=("$sound")
   fi
 done
@@ -115,7 +115,54 @@ else
   fi
 fi
 
-# ── 5. Settings Integration ─────────────────────────────────────────
+# ── 5. CodeGuard Pipeline ──────────────────────────────────────────
+echo "│"
+echo "├─ CodeGuard Pipeline"
+CODEGUARD="${SCRIPT_DIR}/peon-codeguard.sh"
+if [[ -x "$CODEGUARD" ]]; then
+  _pass "CodeGuard script is executable"
+else
+  if [[ -f "$CODEGUARD" ]]; then
+    _fail "CodeGuard script not executable: ${CODEGUARD}"
+    if [[ "${1:-}" == "--fix" ]]; then
+      chmod +x "$CODEGUARD"
+      echo "│       └─ Fixed: chmod +x applied"
+    fi
+  else
+    _warn "CodeGuard script not found: ${CODEGUARD}"
+  fi
+fi
+
+# Check codeguard config
+if command -v jq &>/dev/null && [[ -f "$PEON_CONFIG_FILE" ]]; then
+  CG_ENABLED=$(jq -r '.codeguard.enabled // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  if [[ "$CG_ENABLED" == "true" ]]; then
+    _pass "CodeGuard enabled in config"
+  elif [[ "$CG_ENABLED" == "false" ]]; then
+    _warn "CodeGuard disabled in config"
+  else
+    _warn "CodeGuard config section missing from peon.json"
+  fi
+fi
+
+# Check available linters
+echo "│  Available linters:"
+for linter_cmd in eslint ruff flake8 shellcheck go rubocop cargo; do
+  if command -v "$linter_cmd" &>/dev/null; then
+    echo "│    ✅ $linter_cmd"
+  else
+    echo "│    ⬚  $linter_cmd (not installed)"
+  fi
+done
+
+# Check claude CLI for debug review
+if command -v claude &>/dev/null; then
+  _pass "claude CLI available (for debug review)"
+else
+  _warn "claude CLI not found — debug review will be skipped"
+fi
+
+# ── 6. Settings Integration ─────────────────────────────────────────
 echo "│"
 echo "├─ Claude Code Integration"
 SETTINGS_FILE="${HOME}/.claude/settings.local.json"
@@ -126,11 +173,16 @@ if [[ -f "$SETTINGS_FILE" ]]; then
   else
     _warn "settings.local.json does not reference peon-dispatch.sh"
   fi
+  if grep -q "peon-codeguard" "$SETTINGS_FILE" 2>/dev/null; then
+    _pass "Hooks reference peon-codeguard.sh"
+  else
+    _warn "settings.local.json does not reference peon-codeguard.sh"
+  fi
 else
   _warn "No settings.local.json found at ${SETTINGS_FILE}"
 fi
 
-# ── 6. State & Logs ────────────────────────────────────────────────
+# ── 7. State & Logs ────────────────────────────────────────────────
 echo "│"
 echo "├─ State & Logs"
 mkdir -p "${PEON_STATE_DIR}" "${PEON_LOG_DIR}" 2>/dev/null
@@ -142,7 +194,7 @@ if [[ -f "${PEON_LOG_DIR}/peon.log" ]]; then
   echo "│  Log entries: ${local_lines}"
 fi
 
-# ── 7. Play Test ────────────────────────────────────────────────────
+# ── 8. Play Test ────────────────────────────────────────────────────
 if [[ "${1:-}" == "--play-test" ]]; then
   echo "│"
   echo "├─ Playback Test"
