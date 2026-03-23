@@ -155,6 +155,48 @@ for linter_cmd in eslint ruff flake8 shellcheck go rubocop cargo; do
   fi
 done
 
+# Check validators module
+VALIDATORS="${SCRIPT_DIR}/lib/validators.sh"
+if [[ -f "$VALIDATORS" ]]; then
+  _pass "Validators module present (lib/validators.sh)"
+else
+  _warn "Validators module missing — data file validation disabled"
+fi
+
+# Check validator dependencies
+echo "│  Data file validators:"
+if command -v jq &>/dev/null; then
+  echo "│    ✅ jq (JSON validation)"
+else
+  echo "│    ⬚  jq (JSON validation — will try python3 fallback)"
+fi
+if command -v python3 &>/dev/null; then
+  echo "│    ✅ python3 (JSON/YAML/TOML validation)"
+  if python3 -c "import yaml" 2>/dev/null; then
+    echo "│    ✅ PyYAML (YAML validation)"
+  else
+    echo "│    ⬚  PyYAML (pip install pyyaml for YAML validation)"
+  fi
+else
+  echo "│    ⬚  python3 (needed for YAML/TOML validation)"
+fi
+
+# Check codeguard features
+if command -v jq &>/dev/null && [[ -f "$PEON_CONFIG_FILE" ]]; then
+  CG_VALIDATE=$(jq -r '.codeguard.validate_data_files // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  CG_DEDUP=$(jq -r '.codeguard.dedup_enabled // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  CG_BLOCKING=$(jq -r '.codeguard.blocking_mode // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  CG_MAX_KB=$(jq -r '.codeguard.max_file_size_kb // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  echo "│  Features: validate_data=${CG_VALIDATE:-off} dedup=${CG_DEDUP:-off} blocking=${CG_BLOCKING:-off} max_file=${CG_MAX_KB:-500}KB"
+fi
+
+# Check dedup state
+DEDUP_FILE="${PEON_STATE_DIR}/codeguard_hashes"
+if [[ -f "$DEDUP_FILE" ]]; then
+  local_entries=$(wc -l < "$DEDUP_FILE" 2>/dev/null | tr -d ' ')
+  echo "│  Dedup cache: ${local_entries} entries"
+fi
+
 # Check claude CLI for debug review
 if command -v claude &>/dev/null; then
   _pass "claude CLI available (for debug review)"

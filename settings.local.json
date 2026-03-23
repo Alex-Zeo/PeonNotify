@@ -82,6 +82,11 @@
             "type": "command",
             "command": "$HOME/.claude/hooks/peon-codeguard.sh",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/peon-docguard.sh",
+            "timeout": 2
           }
         ]
       }
@@ -117,6 +122,11 @@
             "type": "command",
             "command": "$HOME/.claude/hooks/peon-dispatch.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/peon-docguard.sh",
+            "timeout": 60
           }
         ]
       }

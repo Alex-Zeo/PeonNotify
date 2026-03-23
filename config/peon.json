@@ -34,11 +34,31 @@
   "codeguard": {
     "enabled": true,
     "lint_enabled": true,
+    "validate_data_files": true,
     "claude_debug_enabled": true,
     "claude_debug_model": "sonnet",
-    "skip_extensions": [".md", ".json", ".yaml", ".yml", ".toml", ".txt", ".csv", ".lock", ".svg", ".png", ".jpg", ".gif", ".ico", ".woff", ".woff2", ".eot", ".ttf"],
+    "blocking_mode": false,
+    "max_file_size_kb": 500,
+    "dedup_enabled": true,
+    "review_prompt": null,
+    "skip_extensions": [".md", ".txt", ".csv", ".lock", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".eot", ".ttf", ".map", ".d.ts"],
+    "skip_directories": ["node_modules", "vendor", "dist", "build", ".git", "__pycache__", ".next", "coverage", ".tox", ".mypy_cache", "target", ".venv", "venv"],
+    "validate_extensions": [".json", ".jsonl", ".ndjson", ".yaml", ".yml", ".toml"],
+    "secondary_lint_enabled": false,
     "lint_timeout_sec": 5,
     "debug_timeout_sec": 20
+  },
+
+  "docguard": {
+    "enabled": true,
+    "update_changelog": true,
+    "update_claude_md": true,
+    "suggest_readme": false,
+    "sync_memory_md": true,
+    "min_score_threshold": 3,
+    "flush_model": "sonnet",
+    "flush_timeout_sec": 45,
+    "memory_dir": ""
   },
 
   "event_cooldowns": {

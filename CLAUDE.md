@@ -13,15 +13,37 @@ peon-dispatch.sh     (entry point — registered for every hook event)
 peon-codeguard.sh    (PostToolUse hook — code quality pipeline)
   ├── lib/config.sh    (shared config loader)
   ├── lib/logger.sh    (shared logging)
-  ├── lib/linter.sh    (language detection & linter dispatch)
+  ├── lib/linter.sh    (language detection, project root discovery, linter dispatch)
+  ├── lib/validators.sh (JSON/YAML/TOML syntax validation)
   └── lib/player.sh    (sound feedback on pass/fail)
+
+peon-docguard.sh     (PostToolUse + Stop hook — documentation maintenance)
+  ├── lib/config.sh    (shared config loader)
+  ├── lib/logger.sh    (shared logging)
+  ├── lib/docguard.sh  (accumulate/flush logic, changelog gen, memory sync)
+  └── lib/player.sh    (completion sound on flush)
 ```
 
 ### Dispatch Flow
 Claude Code fires hook → dispatch reads JSON from stdin → extracts `hook_event_name` + metadata → `resolve_event_key()` maps to sound category → checks cooldown → `peon_resolve_sound()` picks random MP3 → `peon_play()` enqueues sound → background drainer plays sequentially.
 
 ### CodeGuard Flow
-Claude writes/edits file → `peon-codeguard.sh` receives PostToolUse JSON on stdin → extracts `tool_input.file_path` → skips non-code extensions → Step 1: `peon_run_linter()` detects language and runs appropriate linter → if lint passes, Step 2: calls `claude -p` with code review prompt → plays `codeguard_pass`, `codeguard_lint_fail`, or `codeguard_error` sound.
+Claude writes/edits file → `peon-codeguard.sh` receives PostToolUse JSON on stdin → extracts `tool_input.file_path` → applies guard chain (exists? vendor dir? skip extension? data file? file size? dedup hash?) → routes to one of two paths:
+
+**Path A — Data files** (`.json`, `.yaml`, `.yml`, `.toml`): `peon_validate_data()` runs syntax validation via jq/python3. Reports parse errors with line numbers.
+
+**Path B — Code files**: Step 1: `peon_run_linter()` detects language, finds project root, runs linter from correct directory. Returns distinct exit codes (0=pass, 1=lint error, 2=config error, 3=timeout). Step 2 (if lint passes): `claude -p` with language-specific review prompt. Uses `NO_ISSUES_FOUND` sentinel for reliable detection.
+
+Plays `codeguard_pass`, `codeguard_lint_fail`, or `codeguard_error` sound. Logs timing metrics. Writes per-session metrics file for aggregate tracking.
+
+### DocGuard Flow
+Two-phase architecture — accumulate during session, flush at end:
+
+**Phase 1 — Accumulate (PostToolUse, ~1ms):** Appends file path + action + timestamp to a session-scoped manifest file. Skips doc files (CHANGELOG, CLAUDE.md, README) and binary files to prevent loops. No AI call.
+
+**Phase 2 — Flush (Stop/SessionEnd):** Reads manifest → deduplicates by file path → scores significance (Write=3, Edit=1 per unique file) → if score ≥ threshold: builds context (manifest + `git diff --stat` + existing CHANGELOG tail) → calls `claude -p` ONCE → applies updates to CHANGELOG.md, CLAUDE.md session log, and syncs memory/MEMORY.md.
+
+**Safety:** Backs up every doc before writing. Skips docs the user edited this session (prevents conflicts). Saves raw AI response for debugging. `NO_DOC_UPDATES_NEEDED` sentinel for trivial sessions. `--dry-run` flag for preview. Stale manifest detection on SessionStart.
 
 **Important**: The `claude -p` call must run with `unset CLAUDECODE` to avoid Claude Code detecting a nested invocation and refusing to run.
 
@@ -46,12 +68,91 @@ Standard fields on every event: `hook_event_name`, `session_id`. Additional fiel
 
 ### CodeGuard-specific fields used
 - `PostToolUse` → `tool_input.file_path`: absolute path to the written/edited file
+- `PostToolUse` → `tool_name`: `Write` or `Edit` (used for logging context)
 - CodeGuard reads `codeguard.*` keys from `peon.json` for all its settings
 - The `unset CLAUDECODE` before `claude -p` is required — without it, the Claude CLI detects it's running inside another Claude Code session and exits
+
+### CodeGuard config keys
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `enabled` | `true` | Master switch |
+| `lint_enabled` | `true` | Run linters on code files |
+| `validate_data_files` | `true` | Multi-layer validation on JSON/JSONL/YAML/TOML |
+| `claude_debug_enabled` | `true` | Run claude -p debug review |
+| `claude_debug_model` | `"sonnet"` | Model for debug review |
+| `blocking_mode` | `false` | Exit non-zero on errors (blocks Claude Code) |
+| `max_file_size_kb` | `500` | Skip files larger than this |
+| `dedup_enabled` | `true` | Skip if file content unchanged since last check |
+| `review_prompt` | `null` | Custom review prompt (null = language-specific defaults) |
+| `skip_extensions` | `[...]` | File extensions to skip entirely |
+| `skip_directories` | `[...]` | Directory names to skip (vendor, generated, etc.) |
+| `validate_extensions` | `[".json",".jsonl",".ndjson",".yaml",".yml",".toml"]` | Data file extensions to validate |
+| `secondary_lint_enabled` | `false` | Run type checkers (mypy/pyright) as advisory step |
+| `lint_timeout_sec` | `5` | Linter timeout |
+| `debug_timeout_sec` | `20` | Debug review timeout |
+
+### Linter return codes
+`peon_run_linter()` returns structured exit codes:
+- `0` — lint passed (or skipped: no linter available, unknown language)
+- `1` — lint errors found in the code
+- `2` — linter config/internal error (not a code quality issue)
+- `3` — linter timed out
+
+### JSON validation layers
+`peon_validate_json()` applies four layers (requires python3 for layers 2-4):
+
+| Layer | What it catches | Example |
+|-------|----------------|---------|
+| L1 Syntax | Parse errors, encoding, BOM, empty files | `{"key": value}` → missing quotes |
+| L2 Integrity | Duplicate keys (silent data loss) | `{"port": 3000, "port": 8080}` |
+| L3 Structure | Deep nesting (>20), mixed-type arrays, oversized strings | `[1, "two", true]` in data array |
+| L4 Schema | Known-file validation (package.json, tsconfig.json) | `"lodash": "*"` wildcard dep |
+
+Layers 2-4 are unavailable when falling back to jq-only (no python3).
+
+### JSONL/NDJSON validation
+`peon_validate_jsonl()` checks each line as independent JSON. Reports line number and column of first error. Caps at 10,000 lines and 5 errors to avoid blocking on large files.
+
+### Supported linters
+| Language | Primary linter | Secondary (advisory) |
+|----------|---------------|---------------------|
+| JavaScript/TypeScript | eslint | — |
+| Python | ruff > flake8 | mypy > pyright |
+| Shell | shellcheck | — |
+| Go | go vet | — |
+| Rust | cargo clippy | — |
+| Ruby | rubocop | — |
+| SQL | sqlfluff | — |
+
+### DocGuard config keys
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `enabled` | `false` | Master switch (opt-in) |
+| `update_changelog` | `true` | Create/prepend CHANGELOG.md entries |
+| `update_claude_md` | `true` | Append to CLAUDE.md DOCGUARD session log section |
+| `suggest_readme` | `false` | Output README update suggestions to stdout |
+| `sync_memory_md` | `true` | Mechanical sync of memory/MEMORY.md index |
+| `min_score_threshold` | `3` | Minimum significance score to trigger flush |
+| `flush_model` | `"sonnet"` | Model for changelog generation |
+| `flush_timeout_sec` | `45` | Timeout for the claude -p call |
+| `memory_dir` | `""` | Path to memory directory (empty = skip sync) |
+
+### DocGuard significance scoring
+Each unique file scores once (dedup by path, highest action wins):
+- `Write` (new file): **+3**
+- `Edit` (modification): **+1**
+- Doc files (CHANGELOG, CLAUDE.md, README): **skipped** (prevent loops)
+- Binary files (png, mp3, zip, etc.): **skipped**
+
+Default threshold: **≥ 3** → 1 new file, or 3+ code edits, triggers flush.
 
 ### Testing hooks manually
 ```bash
 echo '{"hook_event_name":"Stop","session_id":"test"}' | bash -x ~/.claude/hooks/peon-dispatch.sh
+# DocGuard: preview what would be generated
+peon-docguard.sh --dry-run
+# DocGuard: manually flush pending manifests
+peon-docguard.sh --flush
 ```
 
 ## Bugs Fixed
@@ -64,6 +165,61 @@ echo '{"hook_event_name":"Stop","session_id":"test"}' | bash -x ~/.claude/hooks/
 
 ### PreCompact matchers don't match (settings.local.json fix)
 `PreCompact` entries originally had `"matcher": "manual"` and `"matcher": "auto"` to differentiate compaction triggers. These matchers never matched the event payload, causing the hook to silently never fire. Fix: removed matchers entirely — the dispatch script already reads the `trigger` field from the JSON payload and routes to `compact_manual` or `compact_auto` internally.
+
+## CodeGuard Audit (v2 — 10-iteration upgrade)
+
+### Fixes applied
+
+| ID | Weakness | Fix |
+|----|----------|-----|
+| W1 | `go vet` on individual files doesn't work | Runs `go vet .` from file's directory (package-level) |
+| W2 | `cargo clippy` ignores file, runs from wrong dir | Runs from Cargo.toml directory; skips if no Cargo.toml found |
+| W3 | Linters can't find configs (eslint, rubocop) | `_find_project_root()` walks up to project markers; linters `cd` there |
+| W4 | Silent failure: linter exits non-zero with empty output | Reports crash with exit code instead of passing silently |
+| W5 | Linter timeout returns exit 0 (misleading "pass") | Returns exit 3; logged as warning; doesn't claim "passed" |
+| W6 | No distinction: config errors vs lint errors | Exit >= 2 labeled as config issue, doesn't block debug review |
+| W7 | No file size limit (huge files waste tokens/timeout) | `max_file_size_kb` config (default 500KB), skips large files |
+| W8 | File content in bash arg string hits ARG_MAX | Uses temp file for prompt construction |
+| W9 | Unbounded stdin read | `head -c 65536` caps at 64KB |
+| W10 | JSON/YAML/TOML completely skipped (in skip_extensions) | Removed from skip list; routed to new validators module |
+| W11 | No skip for vendor/generated directories | `skip_directories` config; checks path for node_modules, dist, .git, etc. |
+| W12 | Minified/bundle files not excluded | Pattern match on `.min.js`, `.bundle.js`, etc. |
+| W13 | `grep -qi "no issues found"` heuristic is fragile | Model instructed to use exact sentinel `NO_ISSUES_FOUND`; matched with `==` |
+| W14 | Same review prompt for all languages | Language-specific prompts with targeted focus areas |
+| W15 | Debug review output not in structured log | `output_length` logged; full output available in hook stdout |
+| W16 | No dedup — same file linted repeatedly | Content-hash dedup with `codeguard_hashes` state file |
+| W17 | No timing metrics | `_now_ms()` timestamps; duration logged and displayed |
+| W18 | `_timeout_cmd()` duplicated in linter.sh and codeguard.sh | `peon_timeout_cmd()` exported from linter.sh; codeguard reuses it |
+| W19 | Review prompt hardcoded in bash | `review_prompt` config key; `null` = language-specific defaults |
+| W20 | Missing file extensions (.cjs, .cts, .pyw, .zsh) | Added to `peon_detect_language()` |
+| W21 | Always exits 0 — can't block Claude Code | `blocking_mode` config; exits 1 on errors when enabled |
+| W22 | No session-level aggregate metrics | Per-session metrics JSONL file in state directory |
+| W25 | No validators module | New `lib/validators.sh` with JSON (jq/python3), YAML, TOML validation |
+| W26 | Health check doesn't cover new features | Added validator deps, feature flags, dedup state to health check |
+
+## DocGuard Audit (10-iteration design hardening)
+
+| # | Weakness | Mitigation |
+|---|----------|------------|
+| W1 | Manifest corruption under concurrent hooks | `echo >> file` is atomic for lines < PIPE_BUF on local fs |
+| W2 | Manifest spans crashed sessions | Session-scoped manifest filenames; stale detection on SessionStart |
+| W3 | Haiku produces shallow summaries | Default to sonnet (one call per session — cost negligible) |
+| W4 | Manifest has file names but no diffs | `git diff --stat HEAD` included in context |
+| W5 | No style examples in prompt | Existing CHANGELOG tail included for style matching |
+| W7 | User has uncommitted manual edits to doc files | Skip docs that appear in manifest (user edited this session) |
+| W8 | Generated markdown is malformed | Validate response starts with `## `; save invalid responses for debug |
+| W9 | Project root ambiguity | `git rev-parse --show-toplevel` with CWD fallback |
+| W10 | Multiple CLAUDE.md locations | Checks both project root and `.claude/` |
+| W11 | CHANGELOG.md doesn't exist | Creates with standard header (low-risk) |
+| W12 | Memory dir path encoding is fragile | Explicit `memory_dir` config instead of auto-detection |
+| W13 | MEMORY.md 200-line truncation | Warns if >180 lines; 1 line per entry |
+| W17 | Multiple edits to same file inflate score | Dedup by file path; highest action wins (Write > Edit) |
+| W19 | No dry-run mode | `--dry-run` flag outputs context without writing |
+| W20 | No undo mechanism | Backups in state dir before every write |
+| W21 | Generated content not inspectable | Raw response saved to `docguard_last_response.md` |
+| W22 | Associative arrays require bash 4+ | Uses awk for dedup (bash 3.2 / macOS compat) |
+| W24 | Non-git projects have no diff context | All git ops wrapped in `if git rev-parse; then` |
+| W27 | Sentinel in legitimate output | Extremely unlikely in changelog format |
 
 ## Known Fragility
 
