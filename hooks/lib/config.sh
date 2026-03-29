@@ -37,6 +37,8 @@ _json_get() {
     jq -r ".$key // empty" "$file" 2>/dev/null
   else
     # Fallback: basic grep extraction for simple keys
+    # NOTE: $key is used in a regex pattern; works for simple alphanumeric keys
+    # but keys with regex metacharacters (.+*?[]{}|^$) will break this path
     (grep -o "\"$key\"[[:space:]]*:[[:space:]]*[^,}]*" "$file" 2>/dev/null \
       | head -1 \
       | sed 's/.*:[[:space:]]*//' \
@@ -122,6 +124,46 @@ _peon_apply_profile() {
   fi
 }
 
+# ── Config Validation ──────────────────────────────────────────────
+_peon_validate_config() {
+  command -v jq &>/dev/null || return 0
+  [[ ! -f "$PEON_CONFIG_FILE" ]] && return 0
+
+  local known_keys="enabled volume mute cooldown_ms log_level log_max_lines sound_pack platform_override active_profile event_sounds event_cooldowns codeguard docguard watchdog profiles obsidian"
+  local actual_keys
+  actual_keys=$(jq -r 'keys[]' "$PEON_CONFIG_FILE" 2>/dev/null) || return 0
+
+  local key
+  while IFS= read -r key; do
+    [[ -z "$key" ]] && continue
+    local found=false
+    local k
+    for k in $known_keys; do
+      if [[ "$key" == "$k" ]]; then
+        found=true
+        break
+      fi
+    done
+    if [[ "$found" == "false" ]]; then
+      echo "[peon] WARNING: unknown config key '$key' in $PEON_CONFIG_FILE" >&2
+    fi
+  done <<< "$actual_keys"
+}
+
+# ── State Garbage Collection ──────────────────────────────────────
+_peon_gc_state() {
+  [[ ! -d "$PEON_STATE_DIR" ]] && return 0
+  # Delete metrics/backup/manifest files older than 7 days
+  find "$PEON_STATE_DIR" -name 'codeguard_metrics_*' -mtime +7 -delete 2>/dev/null || true
+  find "$PEON_STATE_DIR" -name 'docguard_backup_*' -mtime +7 -delete 2>/dev/null || true
+  find "$PEON_STATE_DIR" -name 'docguard_manifest_*' -mtime +7 -delete 2>/dev/null || true
+  find "$PEON_STATE_DIR" -name 'obsidian_manifest_*' -mtime +7 -delete 2>/dev/null || true
+  find "$PEON_STATE_DIR" -name 'obsidian_response_*' -mtime +7 -delete 2>/dev/null || true
+  find "$PEON_STATE_DIR" -name 'obsidian_*.failed' -mtime +30 -delete 2>/dev/null || true
+  # Clean stale lock dirs older than 120 seconds
+  find "$PEON_STATE_DIR" -maxdepth 1 -name '*.lk' -type d -mmin +2 -exec rmdir {} \; 2>/dev/null || true
+}
+
 # ── Load Configuration ──────────────────────────────────────────────
 peon_load_config() {
   PEON_ACTIVE_PROFILE="default"
@@ -138,6 +180,9 @@ peon_load_config() {
     return 0
   fi
 
+  # Read platform override BEFORE profile merge so env var is respected during merging
+  PEON_PLATFORM_OVERRIDE=$(_json_get "$PEON_CONFIG_FILE" "platform_override")
+
   # Apply profile overrides (may redirect PEON_CONFIG_FILE to merged file)
   _peon_apply_profile
 
@@ -148,7 +193,6 @@ peon_load_config() {
   PEON_LOG_LEVEL=$(_json_get "$PEON_CONFIG_FILE" "log_level")
   PEON_LOG_MAX_LINES=$(_json_get "$PEON_CONFIG_FILE" "log_max_lines")
   PEON_SOUND_PACK=$(_json_get "$PEON_CONFIG_FILE" "sound_pack")
-  PEON_PLATFORM_OVERRIDE=$(_json_get "$PEON_CONFIG_FILE" "platform_override")
 
   # Apply defaults for missing values
   PEON_ENABLED="${PEON_ENABLED:-true}"
@@ -160,6 +204,45 @@ peon_load_config() {
   PEON_SOUND_PACK="${PEON_SOUND_PACK:-peon}"
 
   PEON_PLATFORM=$(_detect_platform)
+
+  # Validate config for unknown keys (warns to stderr)
+  _peon_validate_config
+
+  # Probabilistic garbage collection of stale state files (1 in 20 calls)
+  if (( RANDOM % 20 == 0 )); then _peon_gc_state; fi
+}
+
+# ── Millisecond Timestamp (macOS compat) ──────────────────────────
+_now_ms() {
+  if command -v gdate &>/dev/null; then
+    gdate +%s%3N
+  else
+    echo $(( $(date +%s) * 1000 ))
+  fi
+}
+
+# ── Generic Config Accessor ────────────────────────────────────────
+# Usage: peon_config_get <section> <key> [default]
+# Centralizes jq lookups so subsystems don't duplicate _cg_get/_dg_get/_wd_get
+peon_config_get() {
+  local section="$1" key="$2" default="${3:-}"
+  if command -v jq &>/dev/null && [[ -f "$PEON_CONFIG_FILE" ]]; then
+    local val
+    val=$(jq -r ".${section}.${key} // empty" "$PEON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && echo "$val" && return
+  fi
+  echo "$default"
+}
+
+# ── Timeout Command (macOS compat) ────────────────────────────────
+peon_timeout_cmd() {
+  if command -v timeout &>/dev/null; then
+    echo "timeout"
+  elif command -v gtimeout &>/dev/null; then
+    echo "gtimeout"
+  else
+    echo ""
+  fi
 }
 
 # ── Cooldown Management ─────────────────────────────────────────────
@@ -180,13 +263,7 @@ peon_check_cooldown() {
   if [[ -f "$cf" ]]; then
     local last_ms now_ms diff
     last_ms=$(cat "$cf" 2>/dev/null || echo 0)
-    if command -v gdate &>/dev/null; then
-      now_ms=$(gdate +%s%3N)
-    elif date +%s%3N &>/dev/null 2>&1; then
-      now_ms=$(date +%s%3N)
-    else
-      now_ms=$(( $(date +%s) * 1000 ))
-    fi
+    now_ms=$(_now_ms)
     diff=$(( now_ms - last_ms ))
     (( diff < cooldown_ms )) && return 1
   fi
@@ -198,13 +275,7 @@ peon_set_cooldown() {
   mkdir -p "$PEON_STATE_DIR" 2>/dev/null
   local cf
   cf=$(_cooldown_file "$event_key")
-  if command -v gdate &>/dev/null; then
-    gdate +%s%3N > "$cf"
-  elif date +%s%3N &>/dev/null 2>&1; then
-    date +%s%3N > "$cf"
-  else
-    echo "$(( $(date +%s) * 1000 ))" > "$cf"
-  fi
+  _now_ms > "$cf"
 }
 
 # ── Sound File Resolution ───────────────────────────────────────────

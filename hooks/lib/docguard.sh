@@ -86,6 +86,15 @@ _docguard_release_lock() {
   fi
 }
 
+# H6: Global lock for entire flush operation — prevents fd 9 reuse from
+# silently releasing the first lock when acquiring a second per-file lock.
+_docguard_global_lock() {
+  _docguard_acquire_lock "${PEON_STATE_DIR:-$HOME/.claude/state}/docguard_flush.lk" 10
+}
+_docguard_global_unlock() {
+  _docguard_release_lock "${PEON_STATE_DIR:-$HOME/.claude/state}/docguard_flush.lk"
+}
+
 # ── Project Root ───────────────────────────────────────────────────
 _docguard_project_root() {
   local root
@@ -175,7 +184,9 @@ _docguard_build_context() {
   echo ""
 
   # Deduplicated file list with action type
-  awk -F'|' -v root="${proj_root}/" '
+  # M16: Cap manifest to last 50 unique files to stay within token limits
+  local manifest_content
+  manifest_content=$(awk -F'|' -v root="${proj_root}/" '
     { files[$3] = $2 }
     END {
       for (f in files) {
@@ -185,7 +196,8 @@ _docguard_build_context() {
         print "- [" files[f] "] " relpath
       }
     }
-  ' "$manifest"
+  ' "$manifest" | tail -n 50)
+  echo "$manifest_content"
 
   echo ""
 
@@ -197,6 +209,17 @@ _docguard_build_context() {
       echo "## Git Diff Summary"
       echo '```'
       echo "$diff_stat"
+      echo '```'
+      echo ""
+    fi
+
+    # M17: Include truncated diff content for better changelog accuracy
+    local diff_content=""
+    diff_content=$(git -C "$proj_root" diff HEAD 2>/dev/null | head -200)
+    if [[ -n "$diff_content" ]]; then
+      echo "## Git Diff Content (truncated)"
+      echo '```diff'
+      echo "$diff_content"
       echo '```'
       echo ""
     fi
@@ -250,20 +273,30 @@ Output ONLY the changelog entry. No preamble, no explanation."
     tpfx="$tmout ${timeout_sec}s"
   fi
 
-  local output
-  output=$(unset CLAUDECODE; $tpfx claude -p \
-    --model "$model" \
-    --append-system-prompt "$system_prompt" \
-    "$context" 2>&1) || {
+  # H9: Retry loop for transient claude -p failures (2 retries, 3s delay)
+  local _dg_attempt=0
+  local _dg_max_retries=2
+  local output=""
+  while (( _dg_attempt <= _dg_max_retries )); do
+    output=$(unset CLAUDECODE; $tpfx claude -p \
+      --model "$model" \
+      --append-system-prompt "$system_prompt" \
+      "$context" 2>&1) && break
     local exit_code=$?
     if [[ $exit_code -eq 124 ]]; then
-      peon_log warn "docguard.generate_timeout" "timeout=${timeout_sec}s"
+      peon_log warn "docguard.generate_timeout" "timeout=${timeout_sec}s" "attempt=$((_dg_attempt + 1))"
     else
-      peon_log warn "docguard.generate_error" "exit_code=$exit_code"
+      peon_log warn "docguard.generate_error" "exit_code=$exit_code" "attempt=$((_dg_attempt + 1))"
     fi
+    (( ++_dg_attempt ))
+    if (( _dg_attempt <= _dg_max_retries )); then
+      sleep 3
+    fi
+  done
+  if (( _dg_attempt > _dg_max_retries )); then
     echo ""
     return 1
-  }
+  fi
 
   # W8: Basic validation — response should start with ## or NO_DOC
   if [[ "$output" != "## "* && "$output" != *"NO_DOC_UPDATES_NEEDED"* ]]; then
@@ -303,14 +336,7 @@ _docguard_apply_changelog() {
   local state_dir="${PEON_STATE_DIR:-$HOME/.claude/state}"
   local session_id="${PEON_SESSION_ID:-unknown}"
 
-  # Acquire lock for this file
-  local lockfile
-  lockfile=$(_docguard_lock_file "$changelog")
-  if ! _docguard_acquire_lock "$lockfile" 10; then
-    peon_log warn "docguard.changelog_lock_failed" "file=$changelog"
-    return 1
-  fi
-
+  # H6: Per-file locking removed — caller (docguard_flush) holds global lock
   if [[ -f "$changelog" ]]; then
     # W20: Session-scoped backup (won't collide with other sessions)
     cp "$changelog" "${state_dir}/docguard_backup_CHANGELOG_${session_id}.md" 2>/dev/null || true
@@ -345,7 +371,6 @@ _docguard_apply_changelog() {
     } > "$changelog"
   fi
 
-  _docguard_release_lock "$lockfile"
   peon_log info "docguard.changelog_updated" "file=$changelog"
 }
 
@@ -367,13 +392,7 @@ _docguard_apply_claude_md() {
   today=$(date +%Y-%m-%d)
   local entry="- **${today}**: ${summary}"
 
-  # Acquire lock for this file
-  local lockfile
-  lockfile=$(_docguard_lock_file "$claude_md")
-  if ! _docguard_acquire_lock "$lockfile" 10; then
-    peon_log warn "docguard.claude_md_lock_failed" "file=$claude_md"
-    return 1
-  fi
+  # H6: Per-file locking removed — caller (docguard_flush) holds global lock
 
   # W20: Session-scoped backup
   cp "$claude_md" "${state_dir}/docguard_backup_CLAUDE_${session_id}.md" 2>/dev/null || true
@@ -403,7 +422,6 @@ _docguard_apply_claude_md() {
     mv "${claude_md}.tmp" "$claude_md"
   fi
 
-  _docguard_release_lock "$lockfile"
   peon_log info "docguard.claude_md_updated" "file=$claude_md"
 }
 
@@ -522,6 +540,12 @@ docguard_flush() {
     return 0
   fi
 
+  # H6: Acquire global lock for entire flush (prevents fd 9 reuse across per-file locks)
+  if ! _docguard_global_lock; then
+    peon_log warn "docguard.flush_global_lock_failed"
+    return 1
+  fi
+
   # Read config
   local min_score
   min_score=$(_dg_target "min_score_threshold" "3")
@@ -540,6 +564,7 @@ docguard_flush() {
   if (( score < min_score )); then
     peon_log info "docguard.flush_skip" "reason=below_threshold" "score=$score"
     rm -f "$manifest" 2>/dev/null
+    _docguard_global_unlock
     return 0
   fi
 
@@ -560,6 +585,7 @@ docguard_flush() {
     echo "--- Prompt context ---"
     echo "$context"
     echo "--- End context ---"
+    _docguard_global_unlock
     return 0
   fi
 
@@ -571,6 +597,7 @@ docguard_flush() {
   if [[ -z "$changelog_entry" ]]; then
     peon_log warn "docguard.flush_empty_response"
     rm -f "$manifest" 2>/dev/null
+    _docguard_global_unlock
     return 0
   fi
 
@@ -579,6 +606,7 @@ docguard_flush() {
     peon_log info "docguard.flush_no_updates"
     echo "[DocGuard] No documentation updates needed for this session."
     rm -f "$manifest" 2>/dev/null
+    _docguard_global_unlock
     return 0
   fi
 
@@ -637,6 +665,9 @@ docguard_flush() {
 
   # Clear manifest
   rm -f "$manifest" 2>/dev/null
+
+  # H6: Release global lock
+  _docguard_global_unlock
 
   peon_log info "docguard.flush_complete" "score=$score"
 }

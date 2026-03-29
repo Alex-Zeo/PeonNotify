@@ -39,7 +39,9 @@
     "claude_debug_enabled": true,
     "claude_debug_model": "sonnet",
     "blocking_mode": false,
-    "max_file_size_kb": 500,
+    "max_file_size_kb": 100,
+    "max_reviews_per_file": 3,
+    "max_reviews_per_session": 20,
     "dedup_enabled": true,
     "review_prompt": null,
     "skip_extensions": [".md", ".txt", ".csv", ".lock", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".eot", ".ttf", ".map", ".d.ts"],
@@ -82,6 +84,29 @@
     "auto_restart": true
   },
 
+  "obsidian": {
+    "enabled": true,
+    "vault_path": "~/Documents/Obsidian",
+    "flush_model": "sonnet",
+    "flush_timeout_sec": 60,
+    "flush_mode": "hybrid",
+    "create_atomic_notes": true,
+    "daily_notes": true,
+    "project_tracking": true,
+    "goal_tracking": true,
+    "max_atomic_notes_per_session": 5,
+    "max_prompt_tokens": 30000,
+    "min_score_threshold": 5,
+    "max_retries": 2,
+    "retry_delay_sec": 3,
+    "auto_archive": true,
+    "archive_after_days": 90,
+    "cron_enabled": true,
+    "cron_hour": 9,
+    "cron_gap_days": 7,
+    "cron_trend_days": 7
+  },
+
   "profiles": {
     "developer": {
       "event_sounds": {
@@ -90,7 +115,8 @@
         "subagent_stop": ["jobs_done.mp3"]
       },
       "codeguard": { "enabled": false },
-      "docguard": { "enabled": false }
+      "docguard": { "enabled": false },
+      "obsidian": { "enabled": false }
     }
   }
 }

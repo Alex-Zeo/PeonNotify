@@ -82,6 +82,12 @@ copy_if_newer "${INSTALLER_DIR}/hooks/peon-health.sh"     "${TARGET_DIR}/hooks/p
 copy_if_newer "${INSTALLER_DIR}/hooks/lib/config.sh"      "${TARGET_DIR}/hooks/lib/config.sh"
 copy_if_newer "${INSTALLER_DIR}/hooks/lib/logger.sh"      "${TARGET_DIR}/hooks/lib/logger.sh"
 copy_if_newer "${INSTALLER_DIR}/hooks/lib/player.sh"      "${TARGET_DIR}/hooks/lib/player.sh"
+copy_if_newer "${INSTALLER_DIR}/hooks/lib/linter.sh"      "${TARGET_DIR}/hooks/lib/linter.sh"
+copy_if_newer "${INSTALLER_DIR}/hooks/lib/validators.sh"   "${TARGET_DIR}/hooks/lib/validators.sh"
+copy_if_newer "${INSTALLER_DIR}/hooks/lib/docguard.sh"     "${TARGET_DIR}/hooks/lib/docguard.sh"
+copy_if_newer "${INSTALLER_DIR}/hooks/peon-obsidian.sh"      "${TARGET_DIR}/hooks/peon-obsidian.sh"
+copy_if_newer "${INSTALLER_DIR}/hooks/peon-obsidian-cron.sh" "${TARGET_DIR}/hooks/peon-obsidian-cron.sh"
+copy_if_newer "${INSTALLER_DIR}/hooks/lib/obsidian.sh"       "${TARGET_DIR}/hooks/lib/obsidian.sh"
 
 # Set executable permissions
 chmod +x "${TARGET_DIR}/hooks/peon-dispatch.sh" 2>/dev/null || true
@@ -89,6 +95,8 @@ chmod +x "${TARGET_DIR}/hooks/peon-codeguard.sh" 2>/dev/null || true
 chmod +x "${TARGET_DIR}/hooks/peon-docguard.sh" 2>/dev/null || true
 chmod +x "${TARGET_DIR}/hooks/peon-watchdog.sh" 2>/dev/null || true
 chmod +x "${TARGET_DIR}/hooks/peon-health.sh" 2>/dev/null || true
+chmod +x "${TARGET_DIR}/hooks/peon-obsidian.sh" 2>/dev/null || true
+chmod +x "${TARGET_DIR}/hooks/peon-obsidian-cron.sh" 2>/dev/null || true
 
 # ── 3. Install Config (preserve existing) ───────────────────────────
 echo "│"
@@ -230,6 +238,52 @@ if ! command -v peon-claude &>/dev/null; then
   _log "  # or: export PATH=\"${BIN_DIR}:\$PATH\""
 fi
 
+# ── N. Obsidian Integration ────────────────────────────────────────
+echo "│"
+echo "├─ Obsidian Integration..."
+
+OBS_VAULT_PATH="$HOME/Documents/Obsidian"
+if [[ -f "${TARGET_DIR}/config/peon.json" ]] && command -v jq &>/dev/null; then
+  _vault=$(jq -r '.obsidian.vault_path // empty' "${TARGET_DIR}/config/peon.json" 2>/dev/null)
+  [[ -n "$_vault" && "$_vault" != "null" ]] && OBS_VAULT_PATH="${_vault/#\~/$HOME}"
+fi
+
+if [[ -d "$OBS_VAULT_PATH" ]]; then
+  _ok "Obsidian vault found: ${OBS_VAULT_PATH}"
+  # Copy templates
+  mkdir -p "${OBS_VAULT_PATH}/templates" 2>/dev/null
+  if [[ -d "${INSTALLER_DIR}/hooks/templates/obsidian" ]]; then
+    for tmpl in "${INSTALLER_DIR}/hooks/templates/obsidian/"*.md; do
+      [[ -f "$tmpl" ]] && copy_if_newer "$tmpl" "${OBS_VAULT_PATH}/templates/$(basename "$tmpl")"
+    done
+  fi
+else
+  _log "Obsidian vault not found at ${OBS_VAULT_PATH}"
+  _log "Install Obsidian and create a vault, or set vault_path in peon.json"
+fi
+
+# Install launchd plist (macOS only)
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  PLIST_SRC="${INSTALLER_DIR}/config/com.peonnotify.obsidian-cron.plist"
+  PLIST_DST="$HOME/Library/LaunchAgents/com.peonnotify.obsidian-cron.plist"
+  if [[ -f "$PLIST_SRC" ]]; then
+    if $DRY_RUN; then
+      _log "[dry-run] Install launchd plist"
+    else
+      # Read cron_hour from config
+      CRON_HOUR=9
+      if command -v jq &>/dev/null && [[ -f "${TARGET_DIR}/config/peon.json" ]]; then
+        _hour=$(jq -r '.obsidian.cron_hour // 9' "${TARGET_DIR}/config/peon.json" 2>/dev/null)
+        [[ "$_hour" =~ ^[0-9]+$ ]] && CRON_HOUR="$_hour"
+      fi
+      sed "s|\$HOME|${HOME}|g; s|<integer>9</integer>|<integer>${CRON_HOUR}</integer>|g" "$PLIST_SRC" > "$PLIST_DST"
+      launchctl unload "$PLIST_DST" 2>/dev/null || true
+      launchctl load "$PLIST_DST" 2>/dev/null || true
+      _ok "LaunchAgent installed (daily 9am cron)"
+    fi
+  fi
+fi
+
 # ── 6. Wire Hooks into Claude Code ──────────────────────────────────
 echo "│"
 echo "├─ Wiring Claude Code hooks..."
@@ -251,6 +305,8 @@ else
   if $DRY_RUN; then
     _log "[dry-run] sed '\$HOME' → '${HOME}' in settings.local.json → $SETTINGS_FILE"
   else
+    # NOTE: $HOME must be expanded by sed. Literal $HOME in the installed
+    # settings.local.json will cause all hooks to silently fail.
     sed 's|\$HOME|'"${HOME}"'|g' "${INSTALLER_DIR}/settings.local.json" > "$SETTINGS_FILE"
     _ok "settings.local.json installed (paths expanded)"
   fi

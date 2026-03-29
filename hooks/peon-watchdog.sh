@@ -25,6 +25,13 @@ if [[ ! -t 0 ]]; then
   INPUT=$(head -c 65536)
 fi
 
+if command -v jq &>/dev/null && [[ -n "$INPUT" ]]; then
+  _WD_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
+else
+  _WD_SESSION_ID=$(echo "$INPUT" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' 2>/dev/null | head -1 | sed 's/.*":\s*"//' | sed 's/"$//' || true)
+fi
+export PEON_SESSION_ID="${_WD_SESSION_ID:-unknown}"
+
 # ── Config Helpers ──────────────────────────────────────────────────
 _wd_get() {
   local key="$1" default="${2:-}"
@@ -100,9 +107,16 @@ if (( RSS_MB >= WD_KILL_MB )); then
   if [[ "$WD_AUTO_RESTART" == "true" ]]; then
     RESTART_FILE="${PEON_STATE_DIR}/watchdog_restart.json"
     mkdir -p "$PEON_STATE_DIR" 2>/dev/null
-    cat > "$RESTART_FILE" <<EOJSON
+    if command -v jq &>/dev/null; then
+      jq -n --argjson pid "$CLAUDE_PID" --arg sid "$SESSION_ID" --arg cwd "$SESSION_CWD" \
+        --argjson rss "$RSS_MB" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{pid:$pid, sessionId:$sid, cwd:$cwd, rss_mb:$rss, killed_at:$ts}' > "$RESTART_FILE" 2>/dev/null
+    else
+      # Fallback: simple paths should be safe, only special chars would break
+      cat > "$RESTART_FILE" <<EOJSON
 {"pid":$CLAUDE_PID,"sessionId":"${SESSION_ID}","cwd":"${SESSION_CWD}","rss_mb":$RSS_MB,"killed_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 EOJSON
+    fi
   fi
 
   # Play kill sound synchronously (brief, before process dies)

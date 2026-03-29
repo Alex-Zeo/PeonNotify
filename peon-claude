@@ -23,8 +23,19 @@ rm -f "$RESTART_FILE" 2>/dev/null || true
 
 while true; do
   # Run Claude Code, passing through all arguments
+  # Run Claude Code with signal forwarding
   EXIT_CODE=0
-  claude "$@" || EXIT_CODE=$?
+  claude "$@" &
+  CLAUDE_PID=$!
+
+  # Forward signals to child
+  trap 'kill -TERM $CLAUDE_PID 2>/dev/null; wait $CLAUDE_PID 2>/dev/null; exit' TERM HUP INT
+
+  wait $CLAUDE_PID 2>/dev/null
+  EXIT_CODE=$?
+
+  # Clear trap
+  trap - TERM HUP INT
 
   # Check for watchdog restart flag
   if [[ -f "$RESTART_FILE" ]]; then

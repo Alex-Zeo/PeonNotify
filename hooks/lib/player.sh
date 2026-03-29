@@ -9,6 +9,9 @@ PEON_QUEUE_FILE="${PEON_STATE_DIR:-$HOME/.claude/state}/sound_queue"
 PEON_QUEUE_LOCK="${PEON_STATE_DIR:-$HOME/.claude/state}/sound_queue.lk"
 PEON_PLAYER_LOCK="${PEON_STATE_DIR:-$HOME/.claude/state}/sound_player.lk"
 
+# M11: Cache detected player to avoid re-detection on every play call
+_PEON_CACHED_PLAYER=""
+
 # ── Player Detection ────────────────────────────────────────────────
 _detect_player() {
   case "${PEON_PLATFORM}" in
@@ -52,8 +55,11 @@ _peon_play_sync() {
   local file="$1"
   [[ ! -f "$file" ]] && return 0
 
-  local player
-  player=$(_detect_player)
+  # M11: Cache detected player across calls
+  if [[ -z "$_PEON_CACHED_PLAYER" ]]; then
+    _PEON_CACHED_PLAYER=$(_detect_player)
+  fi
+  local player="$_PEON_CACHED_PLAYER"
   local vol="${PEON_VOLUME:-0.6}"
 
   case "$player" in
@@ -136,9 +142,13 @@ _peon_drain_queue() {
   mkdir "$PEON_PLAYER_LOCK" 2>/dev/null || return 0
 
   # Ensure lock is released on exit
-  trap 'rmdir "$PEON_PLAYER_LOCK" 2>/dev/null' EXIT
+  # H8: Catch HUP/TERM/INT to prevent stranded lock on signals
+  trap 'rmdir "$PEON_PLAYER_LOCK" 2>/dev/null' EXIT HUP TERM INT
 
   while true; do
+    # M9: Refresh lock mtime so stale detector (60s) doesn't break active drainer
+    touch "$PEON_PLAYER_LOCK" 2>/dev/null || true
+
     # Atomically grab queue contents
     local items=""
     local got_lock=false
@@ -159,6 +169,10 @@ _peon_drain_queue() {
     # Nothing left — done
     [[ -z "$items" ]] && break
 
+    # M10: Cap queue to prevent burst of old sounds (keep last 10)
+    local _max_queue=10
+    items=$(echo "$items" | tail -n "$_max_queue")
+
     # Play each sound in order
     while IFS= read -r sound_file; do
       [[ -z "$sound_file" ]] && continue
@@ -167,7 +181,7 @@ _peon_drain_queue() {
   done
 
   rmdir "$PEON_PLAYER_LOCK" 2>/dev/null
-  trap - EXIT
+  trap - EXIT HUP TERM INT
 }
 
 # ── Public API ─────────────────────────────────────────────────────

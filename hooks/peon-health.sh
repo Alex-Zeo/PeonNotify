@@ -266,12 +266,70 @@ else
   _warn "settings.local.json does not reference peon-watchdog.sh"
 fi
 
+# ── N. Obsidian Integration ──────────────────────────────────────
+echo "│"
+echo "├─ Obsidian Integration"
+OBSIDIAN_HOOK="${SCRIPT_DIR}/peon-obsidian.sh"
+if [[ -x "$OBSIDIAN_HOOK" ]]; then
+  _pass "Obsidian hook script is executable"
+else
+  if [[ -f "$OBSIDIAN_HOOK" ]]; then
+    _fail "Obsidian hook not executable: ${OBSIDIAN_HOOK}"
+  else
+    _warn "Obsidian hook not found: ${OBSIDIAN_HOOK}"
+  fi
+fi
+
+if command -v jq &>/dev/null && [[ -f "$PEON_CONFIG_FILE" ]]; then
+  OBS_ENABLED=$(jq -r '.obsidian.enabled // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  OBS_VAULT=$(jq -r '.obsidian.vault_path // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  OBS_VAULT="${OBS_VAULT/#\~/$HOME}"
+  if [[ "$OBS_ENABLED" == "true" ]]; then
+    _pass "Obsidian enabled"
+    if [[ -d "$OBS_VAULT" ]]; then
+      _pass "Vault found: ${OBS_VAULT}"
+      # Count notes
+      note_count=0
+      note_count=$(find "$OBS_VAULT" -name '*.md' -not -path '*/.obsidian/*' 2>/dev/null | wc -l | tr -d ' ')
+      echo "│  Vault notes: ${note_count}"
+      # Last daily note
+      last_daily=""
+      last_daily=$(ls -1 "${OBS_VAULT}/daily/" 2>/dev/null | sort | tail -1 || true)
+      [[ -n "$last_daily" ]] && echo "│  Last daily note: ${last_daily}"
+    else
+      _warn "Vault not found at ${OBS_VAULT}"
+    fi
+  elif [[ "$OBS_ENABLED" == "false" ]]; then
+    _warn "Obsidian disabled in config (set obsidian.enabled=true to activate)"
+  else
+    _warn "Obsidian config section missing from peon.json"
+  fi
+fi
+
+# Check launchd plist
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if launchctl list 2>/dev/null | grep -q "com.peonnotify.obsidian-cron"; then
+    _pass "Cron job loaded (daily 9am)"
+  else
+    _warn "Cron job not loaded (run install.sh to set up)"
+  fi
+fi
+
+if grep -q "peon-obsidian" "${HOME}/.claude/settings.local.json" 2>/dev/null; then
+  _pass "Hooks reference peon-obsidian.sh"
+else
+  _warn "settings.local.json does not reference peon-obsidian.sh"
+fi
+
 # ── 7. Settings Integration ─────────────────────────────────────────
 echo "│"
 echo "├─ Claude Code Integration"
 SETTINGS_FILE="${HOME}/.claude/settings.local.json"
 if [[ -f "$SETTINGS_FILE" ]]; then
   _pass "settings.local.json exists"
+  if grep -q '\$HOME' "$SETTINGS_FILE" 2>/dev/null; then
+    _warn "settings.local.json contains literal \$HOME — hooks will not fire. Run install.sh to fix."
+  fi
   if grep -q "peon-dispatch" "$SETTINGS_FILE" 2>/dev/null; then
     _pass "Hooks reference peon-dispatch.sh"
   else

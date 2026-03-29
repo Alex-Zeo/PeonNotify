@@ -25,7 +25,7 @@ fi
 # ── Read Hook Input (JSON on stdin) ─────────────────────────────────
 INPUT=""
 if [[ ! -t 0 ]]; then
-  INPUT=$(cat)
+  INPUT=$(head -c 65536)
 fi
 
 # Extract fields using jq if available, else grep fallback
@@ -139,6 +139,8 @@ EVENT_KEY=$(resolve_event_key)
 if [[ -z "$EVENT_KEY" ]]; then
   exit 0
 fi
+
+peon_log info "dispatch.start" "event_key=$EVENT_KEY" "hook_event=$HOOK_EVENT"
 
 # Check cooldown
 COOLDOWN=$(peon_get_event_cooldown "$EVENT_KEY")

@@ -86,11 +86,16 @@
           {
             "type": "command",
             "command": "$HOME/.claude/hooks/peon-codeguard.sh",
-            "timeout": 30
+            "timeout": 60
           },
           {
             "type": "command",
             "command": "$HOME/.claude/hooks/peon-docguard.sh",
+            "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/peon-obsidian.sh",
             "timeout": 2
           }
         ]
@@ -132,6 +137,11 @@
             "type": "command",
             "command": "$HOME/.claude/hooks/peon-docguard.sh",
             "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/peon-obsidian.sh",
+            "timeout": 120
           }
         ]
       }

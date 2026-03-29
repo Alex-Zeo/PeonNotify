@@ -23,12 +23,16 @@ _should_log() {
 _rotate_log() {
   local max_lines="${PEON_LOG_MAX_LINES:-5000}"
   if [[ -f "$PEON_LOG_FILE" ]]; then
-    local line_count
-    line_count=$(wc -l < "$PEON_LOG_FILE" 2>/dev/null || echo 0)
-    if (( line_count > max_lines )); then
-      local keep=$(( max_lines / 2 ))
-      tail -n "$keep" "$PEON_LOG_FILE" > "${PEON_LOG_FILE}.tmp" 2>/dev/null
-      mv "${PEON_LOG_FILE}.tmp" "$PEON_LOG_FILE" 2>/dev/null
+    local lock_dir="${PEON_LOG_DIR}/.rotate.lk"
+    if mkdir "$lock_dir" 2>/dev/null; then
+      local line_count
+      line_count=$(wc -l < "$PEON_LOG_FILE" 2>/dev/null || echo 0)
+      if (( line_count > max_lines )); then
+        local keep=$(( max_lines / 2 ))
+        tail -n "$keep" "$PEON_LOG_FILE" > "${PEON_LOG_FILE}.tmp" 2>/dev/null
+        mv "${PEON_LOG_FILE}.tmp" "$PEON_LOG_FILE" 2>/dev/null
+      fi
+      rmdir "$lock_dir" 2>/dev/null
     fi
   fi
 }
@@ -44,19 +48,27 @@ peon_log() {
   mkdir -p "$(dirname "$PEON_LOG_FILE")" 2>/dev/null
 
   local ts
-  ts=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+  if command -v gdate &>/dev/null; then
+    ts=$(gdate -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+  else
+    ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")  # no fake .000 — plain seconds
+  fi
 
   # Build extra fields as JSON key-value pairs
   local extras=""
   for kv in "$@"; do
     local key="${kv%%=*}"
     local val="${kv#*=}"
-    # Escape quotes in value
-    val="${val//\"/\\\"}"
+    # Escape special characters for valid JSON values
+    val="${val//\\/\\\\}"    # backslash first (must be first!)
+    val="${val//\"/\\\"}"    # double quote
+    val="${val//$'\n'/\\n}"  # newline
+    val="${val//$'\r'/\\r}"  # carriage return
+    val="${val//$'\t'/\\t}"  # tab
     extras="${extras},\"${key}\":\"${val}\""
   done
 
-  local json="{\"ts\":\"${ts}\",\"level\":\"${level}\",\"event\":\"${event}\",\"session_id\":\"${PEON_SESSION_ID:-unknown}\",\"pid\":$$${extras}}"
+  local json="{\"ts\":\"${ts}\",\"v\":1,\"level\":\"${level}\",\"event\":\"${event}\",\"session_id\":\"${PEON_SESSION_ID:-unknown}\",\"pid\":$$${extras}}"
 
   echo "$json" >> "$PEON_LOG_FILE" 2>/dev/null
 
