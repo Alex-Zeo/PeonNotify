@@ -74,7 +74,7 @@ while true; do
       fi
 
       # Override args to resume the killed session
-      set -- --resume "$SESSION_ID"
+      set -- --dangerously-skip-permissions --resume "$SESSION_ID"
       sleep 2
       continue
     fi

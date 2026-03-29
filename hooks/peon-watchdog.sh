@@ -127,6 +127,58 @@ EOJSON
     sleep 0.5
   fi
 
+  # Spawn autonomous restarter BEFORE killing (detached from process tree)
+  # This handles the case where user ran `claude` directly, not `peon-claude`
+  if [[ "$WD_AUTO_RESTART" == "true" && -n "$SESSION_ID" ]]; then
+    _RESTART_CWD="${SESSION_CWD:-$HOME}"
+    _RESTART_LOG="${PEON_STATE_DIR}/watchdog_restart.log"
+    (
+      # Detach completely from parent process group
+      # Wait for the claude process to actually die
+      _wait=0
+      while kill -0 "$CLAUDE_PID" 2>/dev/null && (( _wait < 30 )); do
+        sleep 1
+        (( ++_wait ))
+      done
+      sleep 2  # Grace period for cleanup
+
+      # Check if peon-claude wrapper already handled the restart
+      if [[ ! -f "${PEON_STATE_DIR}/watchdog_restart.json" ]]; then
+        # Wrapper consumed the flag — it's handling the restart
+        exit 0
+      fi
+
+      # Wrapper is NOT running — we need to restart autonomously
+      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Autonomous restart: session=${SESSION_ID} rss=${RSS_MB}MB" >> "$_RESTART_LOG"
+
+      # Platform-specific: open a new terminal with the resumed session
+      if [[ "$(uname -s)" == "Darwin" ]]; then
+        # macOS: open new Terminal.app window
+        osascript -e "
+          tell application \"Terminal\"
+            activate
+            do script \"cd '${_RESTART_CWD}' && echo '[Watchdog] Resuming session killed at ${RSS_MB}MB RSS...' && sleep 1 && claude --dangerously-skip-permissions --resume '${SESSION_ID}'\"
+          end tell
+        " 2>/dev/null || true
+      elif command -v tmux &>/dev/null; then
+        # Linux with tmux: create a detached session
+        tmux new-session -d -s "claude-resume-$$" \
+          "cd '${_RESTART_CWD}' && echo '[Watchdog] Resuming session...' && sleep 1 && claude --dangerously-skip-permissions --resume '${SESSION_ID}'" 2>/dev/null || true
+      elif command -v screen &>/dev/null; then
+        # Linux with screen
+        screen -dmS "claude-resume" bash -c \
+          "cd '${_RESTART_CWD}' && echo '[Watchdog] Resuming session...' && sleep 1 && claude --dangerously-skip-permissions --resume '${SESSION_ID}'" 2>/dev/null || true
+      else
+        # Fallback: just log that manual restart is needed
+        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] No terminal emulator found. Manual restart: cd '${_RESTART_CWD}' && claude --dangerously-skip-permissions --resume '${SESSION_ID}'" >> "$_RESTART_LOG"
+      fi
+
+      # Clean up restart flag (we handled it)
+      rm -f "${PEON_STATE_DIR}/watchdog_restart.json" 2>/dev/null
+    ) &>/dev/null &
+    disown
+  fi
+
   # Kill the Claude process
   kill -TERM "$CLAUDE_PID" 2>/dev/null || true
 

@@ -186,14 +186,23 @@ Claude Code sessions can leak memory until they consume your entire system. The 
 | Warning | 800 MB | Plays *"Me not that kind of orc!"*, logs warning |
 | Kill | 1200 MB | Plays Peon death grunt, kills process, flags restart |
 
-**Auto-restart:** Use `peon-claude` instead of `claude` for automatic session recovery after watchdog kills:
+**Self-healing sessions:** When the watchdog kills a session, it automatically spawns a detached restarter process that opens a new terminal and resumes the session with `claude --dangerously-skip-permissions --resume SESSION_ID`. No human input required — overnight sessions recover on their own.
+
+This is designed to work with autonomous research loops like Karpathy's [autoresearch](https://github.com/karpathy/autoresearch), where an agent runs experiments indefinitely while you sleep. Autoresearch's `program.md` instructs the agent to **never stop** — loop forever, modifying code, training, evaluating, keeping improvements, discarding regressions. But long-running sessions leak memory and crash. The watchdog closes that gap: the agent runs, memory grows, the watchdog kills and restarts, and the agent picks up exactly where it left off — no human intervention, no lost progress.
+
+**How restart works:**
+1. Watchdog detects RSS > kill threshold → writes restart flag with session ID and cwd
+2. Spawns a background restarter (detached from Claude's process tree)
+3. Kills the Claude process
+4. Restarter waits for death, then opens a new Terminal.app window (macOS) or tmux/screen session (Linux) with the resumed session
+5. If using the `peon-claude` wrapper, the wrapper handles restart instead (max 5 retries)
 
 ```bash
-# Add to your shell profile:
+# Optional: use the wrapper for explicit restart control
 alias claude='~/.claude/bin/peon-claude'
 ```
 
-The wrapper runs `claude` in a loop. After a watchdog kill, it reads the restart flag, waits 2 seconds, and resumes the session with `claude --resume`. Max 5 restarts before giving up. Also sets `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=10000` which fixes the `/exit` error.
+The wrapper also sets `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=10000` which fixes the `/exit` error.
 
 ### Obsidian Knowledge Graph
 
