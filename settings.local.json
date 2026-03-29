@@ -31,6 +31,11 @@
             "type": "command",
             "command": "$HOME/.claude/hooks/peon-dispatch.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/peon-watchdog.sh",
+            "timeout": 10
           }
         ]
       }

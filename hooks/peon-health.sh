@@ -53,6 +53,14 @@ echo "│  Volume:   ${PEON_VOLUME}"
 echo "│  Mute:     ${PEON_MUTE}"
 echo "│  Cooldown: ${PEON_COOLDOWN_MS}ms"
 echo "│  Pack:     ${PEON_SOUND_PACK}"
+echo "│  Profile:  ${PEON_ACTIVE_PROFILE:-default}"
+if [[ "${PEON_ACTIVE_PROFILE:-default}" != "default" ]]; then
+  if [[ "$PEON_CONFIG_FILE" == *"peon_merged_"* ]]; then
+    _pass "Profile '${PEON_ACTIVE_PROFILE}' merged config active"
+  else
+    _warn "Profile '${PEON_ACTIVE_PROFILE}' set but merge did not apply"
+  fi
+fi
 
 if command -v jq &>/dev/null; then
   _pass "jq available (recommended)"
@@ -204,7 +212,61 @@ else
   _warn "claude CLI not found — debug review will be skipped"
 fi
 
-# ── 6. Settings Integration ─────────────────────────────────────────
+# ── 6. Memory Watchdog ─────────────────────────────────────────────
+echo "│"
+echo "├─ Memory Watchdog"
+WATCHDOG="${SCRIPT_DIR}/peon-watchdog.sh"
+if [[ -x "$WATCHDOG" ]]; then
+  _pass "Watchdog script is executable"
+else
+  if [[ -f "$WATCHDOG" ]]; then
+    _fail "Watchdog script not executable: ${WATCHDOG}"
+    if [[ "${1:-}" == "--fix" ]]; then
+      chmod +x "$WATCHDOG"
+      echo "│       └─ Fixed: chmod +x applied"
+    fi
+  else
+    _warn "Watchdog script not found: ${WATCHDOG}"
+  fi
+fi
+
+if command -v jq &>/dev/null && [[ -f "$PEON_CONFIG_FILE" ]]; then
+  WD_ENABLED=$(jq -r '.watchdog.enabled // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  WD_WARN=$(jq -r '.watchdog.warn_mb // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  WD_KILL=$(jq -r '.watchdog.kill_mb // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  WD_RESTART=$(jq -r '.watchdog.auto_restart // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  if [[ "$WD_ENABLED" == "true" ]]; then
+    _pass "Watchdog enabled (warn: ${WD_WARN:-800}MB, kill: ${WD_KILL:-1200}MB, auto_restart: ${WD_RESTART:-true})"
+  elif [[ "$WD_ENABLED" == "false" ]]; then
+    _warn "Watchdog disabled in config"
+  else
+    _warn "Watchdog config section missing from peon.json"
+  fi
+fi
+
+# Show current Claude Code memory if a session is running
+if command -v pgrep &>/dev/null; then
+  CLAUDE_PIDS=$(pgrep -f "node.*claude" 2>/dev/null || true)
+  if [[ -n "$CLAUDE_PIDS" ]]; then
+    echo "│  Running Claude sessions:"
+    while IFS= read -r cpid; do
+      [[ -z "$cpid" ]] && continue
+      CRSS=$(ps -o rss= -p "$cpid" 2>/dev/null | tr -d ' ' || true)
+      if [[ -n "$CRSS" ]]; then
+        CRSS_MB=$(( CRSS / 1024 ))
+        echo "│    PID ${cpid}: ${CRSS_MB}MB RSS"
+      fi
+    done <<< "$CLAUDE_PIDS"
+  fi
+fi
+
+if grep -q "peon-watchdog" "${HOME}/.claude/settings.local.json" 2>/dev/null; then
+  _pass "Hooks reference peon-watchdog.sh"
+else
+  _warn "settings.local.json does not reference peon-watchdog.sh"
+fi
+
+# ── 7. Settings Integration ─────────────────────────────────────────
 echo "│"
 echo "├─ Claude Code Integration"
 SETTINGS_FILE="${HOME}/.claude/settings.local.json"
@@ -224,7 +286,7 @@ else
   _warn "No settings.local.json found at ${SETTINGS_FILE}"
 fi
 
-# ── 7. State & Logs ────────────────────────────────────────────────
+# ── 8. State & Logs ────────────────────────────────────────────────
 echo "│"
 echo "├─ State & Logs"
 mkdir -p "${PEON_STATE_DIR}" "${PEON_LOG_DIR}" 2>/dev/null
@@ -236,7 +298,7 @@ if [[ -f "${PEON_LOG_DIR}/peon.log" ]]; then
   echo "│  Log entries: ${local_lines}"
 fi
 
-# ── 8. Play Test ────────────────────────────────────────────────────
+# ── 9. Play Test ────────────────────────────────────────────────────
 if [[ "${1:-}" == "--play-test" ]]; then
   echo "│"
   echo "├─ Playback Test"

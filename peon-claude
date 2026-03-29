@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  peon-claude — Claude Code Wrapper with Watchdog Auto-Restart   ║
+# ║                                                                  ║
+# ║  Usage: peon-claude [claude args...]                             ║
+# ║  Drop-in replacement for `claude`. Adds:                         ║
+# ║    1. SessionEnd hook timeout fix (CLAUDE_CODE_SESSIONEND_HOOKS) ║
+# ║    2. Auto-restart when memory watchdog kills the session        ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+PEON_STATE_DIR="${HOME}/.claude/state"
+RESTART_FILE="${PEON_STATE_DIR}/watchdog_restart.json"
+MAX_RESTARTS=5
+RESTART_COUNT=0
+
+# Fix /exit error: give SessionEnd hooks enough time to complete
+export CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS="${CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS:-10000}"
+
+# Clean up any stale restart flag from a previous run
+rm -f "$RESTART_FILE" 2>/dev/null || true
+
+while true; do
+  # Run Claude Code, passing through all arguments
+  EXIT_CODE=0
+  claude "$@" || EXIT_CODE=$?
+
+  # Check for watchdog restart flag
+  if [[ -f "$RESTART_FILE" ]]; then
+    (( ++RESTART_COUNT ))
+
+    if (( RESTART_COUNT > MAX_RESTARTS )); then
+      echo ""
+      echo "[PeonWatchdog] Max restarts ($MAX_RESTARTS) exceeded. Exiting."
+      echo "[PeonWatchdog] Investigate the memory leak before running again."
+      rm -f "$RESTART_FILE"
+      exit 1
+    fi
+
+    # Read restart info
+    SESSION_ID=""
+    KILLED_RSS="?"
+    CWD=""
+    if command -v jq &>/dev/null; then
+      SESSION_ID=$(jq -r '.sessionId // empty' "$RESTART_FILE" 2>/dev/null || true)
+      KILLED_RSS=$(jq -r '.rss_mb // "?"' "$RESTART_FILE" 2>/dev/null || true)
+      CWD=$(jq -r '.cwd // empty' "$RESTART_FILE" 2>/dev/null || true)
+    fi
+
+    # Clean up flag
+    rm -f "$RESTART_FILE"
+
+    if [[ -n "$SESSION_ID" ]]; then
+      echo ""
+      echo "[PeonWatchdog] Claude Code killed (RSS: ${KILLED_RSS}MB) — restart $RESTART_COUNT/$MAX_RESTARTS"
+      echo "[PeonWatchdog] Resuming session: ${SESSION_ID}"
+      echo ""
+
+      # Change to original working directory
+      if [[ -n "$CWD" && -d "$CWD" ]]; then
+        cd "$CWD"
+      fi
+
+      # Override args to resume the killed session
+      set -- --resume "$SESSION_ID"
+      sleep 2
+      continue
+    fi
+  fi
+
+  # Normal exit — break the loop
+  break
+done
+
+exit "${EXIT_CODE:-0}"

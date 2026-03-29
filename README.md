@@ -27,15 +27,18 @@ A single dispatcher script handles all events. It reads the JSON payload, maps t
 
 ```
 ~/.claude/
+├── bin/
+│   └── peon-claude              # Wrapper: auto-restart on memory kill + /exit fix
 ├── hooks/
-│   ├── peon-dispatch.sh        # Single entry point - all hooks route here
-│   ├── peon-codeguard.sh       # Code quality pipeline (lint + debug review)
-│   ├── peon-health.sh          # Diagnostics & validation
+│   ├── peon-dispatch.sh         # Single entry point - all hooks route here
+│   ├── peon-codeguard.sh        # Code quality pipeline (lint + debug review)
+│   ├── peon-watchdog.sh         # Memory leak detector (RSS monitoring)
+│   ├── peon-health.sh           # Diagnostics & validation
 │   └── lib/
-│       ├── config.sh           # Config loader, platform detection, cooldowns
-│       ├── linter.sh           # Language detection & linter dispatch
-│       ├── logger.sh           # Structured JSON logging (wide events)
-│       └── player.sh           # Cross-platform audio playback engine (queued)
+│       ├── config.sh            # Config loader, profiles, platform detection
+│       ├── linter.sh            # Language detection & linter dispatch
+│       ├── logger.sh            # Structured JSON logging (wide events)
+│       └── player.sh            # Cross-platform audio playback engine (queued)
 ├── config/
 │   └── peon.json               # All tunables (volume, mute, sounds, cooldowns)
 ├── sounds/
@@ -158,9 +161,50 @@ Edit `~/.claude/config/peon.json`:
 }
 ```
 
+## Profiles
+
+Profiles let you switch between named sound presets. The `developer` profile plays only essential sounds — permission prompts, agent completion, and subagent completion — keeping things quiet while you work.
+
+```bash
+# Switch via config (persistent)
+# In ~/.claude/config/peon.json: "active_profile": "developer"
+
+# Switch via env var (per-terminal)
+export PEON_PROFILE=developer
+```
+
+**Built-in profiles:**
+
+| Profile | Behavior |
+|---|---|
+| `default` | All 20 event sounds active |
+| `developer` | 3 sounds only: `something_need_doing` (questions), `work_complete` (done), `jobs_done` (subagent done). CodeGuard + DocGuard disabled. |
+
+Add custom profiles in the `profiles` object in `peon.json`. Profile `event_sounds` replaces the base entirely (missing keys = silent). All other keys deep-merge.
+
+## Memory Watchdog
+
+`peon-watchdog.sh` monitors Claude Code's RSS memory and kills runaway sessions before they consume all system memory.
+
+| Threshold | Default | Action |
+|---|---|---|
+| Warning | 800 MB | Plays *"Me not that kind of orc!"*, logs warning |
+| Kill | 1200 MB | Plays Peon death grunt, kills process, flags restart |
+
+**Auto-restart:** Use `peon-claude` instead of `claude` for automatic session recovery after watchdog kills:
+
+```bash
+# Add to your shell profile:
+alias claude='~/.claude/bin/peon-claude'
+```
+
+The wrapper also fixes the `/exit` error by setting `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS`.
+
+Configure thresholds in `peon.json` under the `watchdog` key.
+
 ## Sound Files
 
-Place `.mp3` files in `~/.claude/sounds/peon/`. All 15 files referenced in config:
+Place `.mp3` files in `~/.claude/sounds/peon/`. All 17 files referenced in config:
 
 | File | Peon Quote | Used For |
 |---|---|---|
@@ -179,6 +223,8 @@ Place `.mp3` files in `~/.claude/sounds/peon/`. All 15 files referenced in confi
 | `work_complete.mp3` | "Work complete" | Full response complete (Stop) |
 | `more_gold_required.mp3` | "More gold is required" | Limits |
 | `never_mind.mp3` | "Never mind" | Tool failures (errors) |
+| `me_not_that_kind_of_orc.mp3` | "Me not that kind of orc!" | Watchdog memory warning |
+| `peon_death.mp3` | *(death grunt)* | Watchdog memory kill |
 
 Extract from Warcraft III game files with CascView, download from soundboard sites (101soundboards.com, myinstants.com), or use the placeholder TTS script printed by the installer.
 

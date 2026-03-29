@@ -22,6 +22,14 @@ peon-docguard.sh     (PostToolUse + Stop hook — documentation maintenance)
   ├── lib/logger.sh    (shared logging)
   ├── lib/docguard.sh  (accumulate/flush logic, changelog gen, memory sync)
   └── lib/player.sh    (completion sound on flush)
+
+peon-watchdog.sh     (UserPromptSubmit hook — memory leak detector)
+  ├── lib/config.sh    (shared config loader + profile merge)
+  ├── lib/logger.sh    (shared logging)
+  └── lib/player.sh    (alert sounds on warn/kill)
+
+peon-claude           (wrapper script — auto-restart + /exit fix)
+  └── claude           (launches Claude Code with env var overrides)
 ```
 
 ### Dispatch Flow
@@ -220,6 +228,97 @@ peon-docguard.sh --flush
 | W22 | Associative arrays require bash 4+ | Uses awk for dedup (bash 3.2 / macOS compat) |
 | W24 | Non-git projects have no diff context | All git ops wrapped in `if git rev-parse; then` |
 | W27 | Sentinel in legitimate output | Extremely unlikely in changelog format |
+
+## Profile System
+
+Profiles let you switch between named config presets without editing the base config.
+
+### How it works
+- `active_profile` key in `peon.json` (default: `"default"`)
+- `PEON_PROFILE` env var overrides the config key
+- `_peon_apply_profile()` in `config.sh` generates a merged JSON file at load time
+- `PEON_CONFIG_FILE` is redirected to the merged file → all downstream scripts (dispatch, codeguard, docguard) work transparently with zero changes
+
+### Merge rules
+- `event_sounds`: **REPLACE** — profile provides complete mapping; missing keys = silent
+- Everything else: **DEEP MERGE** — profile overrides only what it specifies
+
+### Built-in profiles
+| Profile | Behavior |
+|---------|----------|
+| `default` | All sounds play (no merging, base config as-is) |
+| `developer` | Only 3 sounds: `permission_prompt` → something_need_doing, `stop` → work_complete, `subagent_stop` → jobs_done. CodeGuard and DocGuard disabled. |
+
+### Adding custom profiles
+Add to `profiles` object in `peon.json`:
+```json
+"profiles": {
+  "quiet": {
+    "mute": true
+  },
+  "loud": {
+    "volume": 1.0,
+    "cooldown_ms": 0
+  }
+}
+```
+
+### Switching profiles
+```bash
+# Via config (persistent)
+jq '.active_profile = "developer"' ~/.claude/config/peon.json > /tmp/peon.json && mv /tmp/peon.json ~/.claude/config/peon.json
+
+# Via env var (per-terminal)
+export PEON_PROFILE=developer
+```
+
+### Profile requires jq
+Without jq, `_peon_apply_profile` silently falls back to the base config.
+
+## Memory Watchdog
+
+`peon-watchdog.sh` monitors Claude Code RSS and kills runaway sessions.
+
+### How it works
+1. Registered as `UserPromptSubmit` hook (fires every prompt)
+2. Gets Claude PID via `$PPID`, validates it's actually a Claude/node process
+3. Reads RSS via `ps -o rss=` (KB → MB)
+4. Below `warn_mb`: silent exit
+5. At `warn_mb`: log warning + play *"Me not that kind of orc!"* (with cooldown)
+6. At `kill_mb`: play Peon death grunt → write restart flag → `kill -TERM $PPID`
+
+### Config keys
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `enabled` | `true` | Master switch |
+| `warn_mb` | `800` | RSS threshold for warning (MB) |
+| `kill_mb` | `1200` | RSS threshold for kill (MB) |
+| `warn_sound` | `me_not_that_kind_of_orc.mp3` | Sound on warning |
+| `kill_sound` | `peon_death.mp3` | Sound before kill |
+| `warn_cooldown_sec` | `300` | Minimum seconds between warnings |
+| `auto_restart` | `true` | Write restart flag for peon-claude wrapper |
+
+### Auto-restart with peon-claude
+`peon-claude` is a wrapper script that runs `claude` in a loop. When the watchdog kills a session:
+1. Watchdog writes `~/.claude/state/watchdog_restart.json` with `{sessionId, cwd, rss_mb}`
+2. Claude process exits
+3. Wrapper reads the flag, waits 2s, runs `claude --resume SESSION_ID`
+4. Max 5 restarts before giving up
+
+Also sets `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=10000` which fixes the `/exit` error.
+
+### Safety
+- PPID command is verified to contain "claude" or "node" before any kill
+- Only SIGTERM (graceful), never SIGKILL
+- If `peon-claude` is not used, watchdog still kills but no auto-restart
+
+## /exit Error Fix
+
+### Root cause
+Claude Code force-kills SessionEnd hooks after 1.5 seconds regardless of `timeout` in `settings.local.json`.
+
+### Fix
+The `peon-claude` wrapper sets `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=10000` (10 seconds). Users who don't use the wrapper should set this env var in their shell profile.
 
 ## Known Fragility
 

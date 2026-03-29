@@ -75,6 +75,9 @@ copy_if_newer() {
 }
 
 copy_if_newer "${INSTALLER_DIR}/hooks/peon-dispatch.sh"   "${TARGET_DIR}/hooks/peon-dispatch.sh"
+copy_if_newer "${INSTALLER_DIR}/hooks/peon-codeguard.sh"  "${TARGET_DIR}/hooks/peon-codeguard.sh"
+copy_if_newer "${INSTALLER_DIR}/hooks/peon-docguard.sh"   "${TARGET_DIR}/hooks/peon-docguard.sh"
+copy_if_newer "${INSTALLER_DIR}/hooks/peon-watchdog.sh"   "${TARGET_DIR}/hooks/peon-watchdog.sh"
 copy_if_newer "${INSTALLER_DIR}/hooks/peon-health.sh"     "${TARGET_DIR}/hooks/peon-health.sh"
 copy_if_newer "${INSTALLER_DIR}/hooks/lib/config.sh"      "${TARGET_DIR}/hooks/lib/config.sh"
 copy_if_newer "${INSTALLER_DIR}/hooks/lib/logger.sh"      "${TARGET_DIR}/hooks/lib/logger.sh"
@@ -82,6 +85,9 @@ copy_if_newer "${INSTALLER_DIR}/hooks/lib/player.sh"      "${TARGET_DIR}/hooks/l
 
 # Set executable permissions
 chmod +x "${TARGET_DIR}/hooks/peon-dispatch.sh" 2>/dev/null || true
+chmod +x "${TARGET_DIR}/hooks/peon-codeguard.sh" 2>/dev/null || true
+chmod +x "${TARGET_DIR}/hooks/peon-docguard.sh" 2>/dev/null || true
+chmod +x "${TARGET_DIR}/hooks/peon-watchdog.sh" 2>/dev/null || true
 chmod +x "${TARGET_DIR}/hooks/peon-health.sh" 2>/dev/null || true
 
 # ── 3. Install Config (preserve existing) ───────────────────────────
@@ -122,6 +128,8 @@ SOUND_FILES=(
   "work_complete.mp3"
   "more_gold_required.mp3"
   "never_mind.mp3"
+  "me_not_that_kind_of_orc.mp3"
+  "peon_death.mp3"
 )
 
 if $SKIP_SOUNDS; then
@@ -187,6 +195,8 @@ else
 │      [work_complete]="Work complete"
 │      [more_gold_required]="More gold is required"
 │      [never_mind]="Never mind"
+│      [me_not_that_kind_of_orc]="Me not that kind of orc!"
+│      [peon_death]="That's it! He's dead!"
 │    )
 │    for name in "${!QUOTES[@]}"; do
 │      if command -v say &>/dev/null; then
@@ -202,7 +212,25 @@ PLACEHOLDER_SCRIPT
   fi
 fi
 
-# ── 5. Wire Hooks into Claude Code ──────────────────────────────────
+# ── 5. Install peon-claude wrapper ──────────────────────────────────
+echo "│"
+echo "├─ Installing peon-claude wrapper..."
+
+BIN_DIR="${TARGET_DIR}/bin"
+if [[ ! -d "$BIN_DIR" ]]; then
+  $DRY_RUN && _log "[dry-run] mkdir -p $BIN_DIR" || mkdir -p "$BIN_DIR"
+fi
+
+copy_if_newer "${INSTALLER_DIR}/peon-claude" "${BIN_DIR}/peon-claude"
+chmod +x "${BIN_DIR}/peon-claude" 2>/dev/null || true
+
+if ! command -v peon-claude &>/dev/null; then
+  _log "Add to your shell profile for auto-restart + /exit fix:"
+  _log "  alias claude='${BIN_DIR}/peon-claude'"
+  _log "  # or: export PATH=\"${BIN_DIR}:\$PATH\""
+fi
+
+# ── 6. Wire Hooks into Claude Code ──────────────────────────────────
 echo "│"
 echo "├─ Wiring Claude Code hooks..."
 
@@ -228,7 +256,7 @@ else
   fi
 fi
 
-# ── 6. Verify ───────────────────────────────────────────────────────
+# ── 7. Verify ───────────────────────────────────────────────────────
 echo "│"
 echo "└─ Running health check..."
 echo ""
@@ -245,9 +273,12 @@ echo "  Next steps:"
 echo "  1. Add sound files to ~/.claude/sounds/peon/"
 echo "  2. Restart Claude Code or run /hooks to verify"
 echo "  3. Test: ~/.claude/hooks/peon-health.sh --play-test"
+echo "  4. Use peon-claude instead of claude for auto-restart + /exit fix"
 echo ""
-echo "  Config:  ~/.claude/config/peon.json"
-echo "  Logs:    ~/.claude/logs/peon.log"
-echo "  Mute:    Set \"mute\": true in config"
+echo "  Config:   ~/.claude/config/peon.json"
+echo "  Logs:     ~/.claude/logs/peon.log"
+echo "  Wrapper:  ~/.claude/bin/peon-claude"
+echo "  Mute:     Set \"mute\": true in config"
+echo "  Profile:  Set \"active_profile\": \"developer\" in config"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""

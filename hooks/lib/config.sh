@@ -72,8 +72,60 @@ _json_get_array() {
   fi
 }
 
+# ── Profile Merging ────────────────────────────────────────────────
+# Generates a merged config file when a non-default profile is active.
+# Merge rules:
+#   event_sounds  → REPLACE (missing keys = silent)
+#   everything else → DEEP MERGE (jq * operator)
+_peon_apply_profile() {
+  command -v jq &>/dev/null || return 0
+  [[ ! -f "$PEON_CONFIG_FILE" ]] && return 0
+
+  # Determine active profile: env var overrides config key
+  local profile="${PEON_PROFILE:-}"
+  if [[ -z "$profile" ]]; then
+    profile=$(jq -r '.active_profile // "default"' "$PEON_CONFIG_FILE" 2>/dev/null)
+  fi
+  profile="${profile:-default}"
+  PEON_ACTIVE_PROFILE="$profile"
+
+  [[ "$profile" == "default" ]] && return 0
+
+  # Check profile exists
+  local has_profile
+  has_profile=$(jq -r --arg p "$profile" 'if .profiles[$p] then "yes" else "no" end' "$PEON_CONFIG_FILE" 2>/dev/null)
+  if [[ "$has_profile" != "yes" ]]; then
+    return 0
+  fi
+
+  # Generate merged config
+  local merged_file="${PEON_STATE_DIR}/peon_merged_${profile}.json"
+  mkdir -p "$PEON_STATE_DIR" 2>/dev/null
+
+  if jq --arg p "$profile" '
+    .profiles[$p] as $prof |
+    # Deep merge base with profile (except event_sounds and meta keys)
+    (del(.profiles, .active_profile)) * (($prof // {}) | del(.event_sounds)) |
+    # Replace event_sounds entirely if profile defines it
+    if ($prof | has("event_sounds"))
+      then .event_sounds = $prof.event_sounds
+      else .
+    end
+  ' "$PEON_CONFIG_FILE" > "$merged_file" 2>/dev/null; then
+    if [[ -s "$merged_file" ]]; then
+      PEON_CONFIG_FILE="$merged_file"
+    else
+      rm -f "$merged_file" 2>/dev/null
+    fi
+  else
+    rm -f "$merged_file" 2>/dev/null
+  fi
+}
+
 # ── Load Configuration ──────────────────────────────────────────────
 peon_load_config() {
+  PEON_ACTIVE_PROFILE="default"
+
   if [[ ! -f "$PEON_CONFIG_FILE" ]]; then
     # Defaults if no config exists
     PEON_ENABLED=true
@@ -85,6 +137,9 @@ peon_load_config() {
     PEON_SOUND_PACK=peon
     return 0
   fi
+
+  # Apply profile overrides (may redirect PEON_CONFIG_FILE to merged file)
+  _peon_apply_profile
 
   PEON_ENABLED=$(_json_get "$PEON_CONFIG_FILE" "enabled")
   PEON_VOLUME=$(_json_get "$PEON_CONFIG_FILE" "volume")
