@@ -117,6 +117,9 @@
       "codeguard": { "enabled": false },
       "docguard": { "enabled": false },
       "obsidian": { "enabled": false }
+    },
+    "silent": {
+      "mute": true
     }
   }
 }
