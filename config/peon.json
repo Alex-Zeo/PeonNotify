@@ -113,13 +113,11 @@
         "permission_prompt": ["something_need_doing.mp3"],
         "stop": ["work_complete.mp3"],
         "subagent_stop": ["jobs_done.mp3"]
-      },
-      "codeguard": { "enabled": false },
-      "docguard": { "enabled": false },
-      "obsidian": { "enabled": false }
+      }
     },
     "silent": {
-      "mute": true
+      "mute": true,
+      "obsidian": { "enabled": false }
     }
   }
 }

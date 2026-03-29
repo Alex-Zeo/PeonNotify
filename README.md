@@ -222,7 +222,7 @@ Every session generates knowledge — decisions, patterns, bugs fixed. Without c
 
 ### Profiles
 
-Profiles let you switch between named config presets without editing the base config. The `developer` profile plays only essential sounds -- permission prompts, agent completion, and subagent completion -- keeping things quiet while you work. CodeGuard, DocGuard, and Obsidian are disabled.
+Profiles let you switch between named config presets without editing the base config.
 
 ```bash
 # Switch via config (persistent)
@@ -234,10 +234,15 @@ export PEON_PROFILE=developer
 
 **Built-in profiles:**
 
-| Profile | Behavior |
-|---|---|
-| `default` | All 20 event sounds active, all subsystems enabled |
-| `developer` | 3 sounds only: `something_need_doing` (questions), `work_complete` (done), `jobs_done` (subagent done). CodeGuard, DocGuard, and Obsidian disabled. |
+| Profile | Sounds | CodeGuard | DocGuard | Watchdog | Obsidian |
+|---------|--------|-----------|----------|----------|----------|
+| `default` | All 20 events | On | On | On | On |
+| `developer` | 3 essential only | On | On | On | On |
+| `silent` | Muted | On | On | On | Off |
+
+- **default** — Full experience. Every event plays a sound, all systems active.
+- **developer** — Quiet focus. Only plays sounds when Claude needs your attention (permission prompts, agent done, subagent done). All quality and knowledge systems stay active.
+- **silent** — Zero audio. All systems active except Obsidian (AI calls on session end add latency that's noticeable without audio feedback to mask it).
 
 Add custom profiles in the `profiles` object in `peon.json`. Profile `event_sounds` replaces the base entirely (missing keys = silent). All other keys deep-merge.
 
