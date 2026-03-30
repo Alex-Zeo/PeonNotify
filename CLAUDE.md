@@ -11,9 +11,9 @@ Audio notification and code quality hooks for Claude Code CLI. Plays Warcraft Pe
 | peon-dispatch.sh | All events | Routes events to sound categories, manages cooldowns |
 | peon-codeguard.sh | PostToolUse | Lint + AI code review on Write/Edit |
 | peon-docguard.sh | PostToolUse + Stop | Accumulate file changes, flush changelog at session end |
-| peon-obsidian.sh | PostToolUse + Stop | Accumulate file changes, flush to Obsidian vault at session end |
+| peon-obsidian.sh | PostToolUse + SessionEnd | Accumulate file changes, flush to Obsidian vault at session end |
 | peon-obsidian-cron.sh | Daily 9am (launchd) | Vault maintenance: trends, gaps, lifecycle, index rebuild |
-| peon-watchdog.sh | UserPromptSubmit | RSS memory monitor, kills runaway sessions |
+| peon-watchdog.sh | UserPromptSubmit + launchd | Memory monitor: per-process + aggregate + system pressure |
 | peon-health.sh | Manual | Diagnostics for deps, config, sounds, hook wiring |
 
 ### Libraries (hooks/lib/)
@@ -35,6 +35,7 @@ Audio notification and code quality hooks for Claude Code CLI. Plays Warcraft Pe
 | config/peon.json | All tunables (sounds, codeguard, docguard, watchdog, obsidian, profiles) |
 | settings.local.json | Claude Code hook wiring (paths expanded by installer) |
 | config/com.peonnotify.obsidian-cron.plist | macOS LaunchAgent for daily cron |
+| config/com.peonnotify.watchdog-cron.plist | macOS LaunchAgent for periodic memory monitoring (every 60s) |
 | hooks/templates/obsidian/*.md | 6 note templates: daily, decision, pattern, pitfall, bug, project-moc |
 
 ### Other
@@ -88,7 +89,10 @@ PostToolUse -> peon-obsidian.sh (accumulate, ~1ms)
   append file+action+timestamp to session manifest
   skip doc files + binaries
 
-Stop -> peon-obsidian.sh (flush)
+SessionEnd -> peon-obsidian.sh (flush)
+  NOTE: Stop fires per-turn, SessionEnd fires per-session.
+  Flushing on Stop would reset the manifest every turn (score ~2-3, below threshold).
+  Requires peon-claude wrapper or CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=10000.
   read manifest -> dedup -> score significance
   if score >= threshold: build context (manifest + git diff)
   -> claude -p -> create/update daily note + atomic notes
@@ -138,6 +142,8 @@ peon-docguard.sh --dry-run     # preview changelog
 peon-docguard.sh --flush       # force flush
 peon-obsidian.sh --dry-run     # preview vault writes
 peon-obsidian.sh --flush       # force flush
+peon-watchdog.sh --status      # show memory state + recent events
+peon-watchdog.sh --cron        # run periodic check manually
 ```
 
 ## Config Reference
@@ -199,8 +205,14 @@ All config lives in `config/peon.json`.
 | Key | Default | Purpose |
 |-----|---------|---------|
 | `enabled` | `true` | Master switch |
-| `warn_mb` | `800` | RSS warning threshold (MB) |
-| `kill_mb` | `1200` | RSS kill threshold (MB) |
+| `warn_mb` | `500` | Per-process RSS warning threshold (MB) |
+| `kill_mb` | `800` | Per-process RSS kill threshold (MB) |
+| `total_warn_mb` | `1500` | Aggregate RSS warning (all Claude sessions) |
+| `total_kill_mb` | `2500` | Aggregate RSS kill (kills largest session) |
+| `system_free_mb_warn` | `512` | System free memory warning threshold |
+| `system_free_mb_kill` | `256` | System free memory kill threshold |
+| `include_children` | `true` | Walk process tree (include subagent RSS) |
+| `cron_interval_sec` | `60` | Periodic check interval (launchd) |
 | `warn_sound` | `"me_not_that_kind_of_orc.mp3"` | Warning sound |
 | `kill_sound` | `"peon_death.mp3"` | Pre-kill sound |
 | `warn_cooldown_sec` | `300` | Seconds between warnings |

@@ -234,9 +234,18 @@ if command -v jq &>/dev/null && [[ -f "$PEON_CONFIG_FILE" ]]; then
   WD_ENABLED=$(jq -r '.watchdog.enabled // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
   WD_WARN=$(jq -r '.watchdog.warn_mb // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
   WD_KILL=$(jq -r '.watchdog.kill_mb // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  WD_TOTAL_WARN=$(jq -r '.watchdog.total_warn_mb // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  WD_TOTAL_KILL=$(jq -r '.watchdog.total_kill_mb // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  WD_SYS_WARN=$(jq -r '.watchdog.system_free_mb_warn // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  WD_SYS_KILL=$(jq -r '.watchdog.system_free_mb_kill // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
+  WD_CHILDREN=$(jq -r '.watchdog.include_children // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
   WD_RESTART=$(jq -r '.watchdog.auto_restart // empty' "$PEON_CONFIG_FILE" 2>/dev/null)
   if [[ "$WD_ENABLED" == "true" ]]; then
-    _pass "Watchdog enabled (warn: ${WD_WARN:-800}MB, kill: ${WD_KILL:-1200}MB, auto_restart: ${WD_RESTART:-true})"
+    _pass "Watchdog enabled"
+    echo "│  Per-process:  warn=${WD_WARN:-500}MB  kill=${WD_KILL:-800}MB"
+    echo "│  Aggregate:    warn=${WD_TOTAL_WARN:-1500}MB  kill=${WD_TOTAL_KILL:-2500}MB"
+    echo "│  System free:  warn=${WD_SYS_WARN:-512}MB  kill=${WD_SYS_KILL:-256}MB"
+    echo "│  Children:     ${WD_CHILDREN:-true}  auto_restart: ${WD_RESTART:-true}"
   elif [[ "$WD_ENABLED" == "false" ]]; then
     _warn "Watchdog disabled in config"
   else
@@ -244,19 +253,38 @@ if command -v jq &>/dev/null && [[ -f "$PEON_CONFIG_FILE" ]]; then
   fi
 fi
 
-# Show current Claude Code memory if a session is running
+# Show system memory overview
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  SYS_TOTAL=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024 ))
+  PAGE_SIZE=$(sysctl -n hw.pagesize 2>/dev/null || echo 16384)
+  VMSTAT=$(vm_stat 2>/dev/null || true)
+  FREE_P=$(echo "$VMSTAT" | awk '/Pages free/ {gsub(/\./,"",$3); print $3}')
+  INACTIVE_P=$(echo "$VMSTAT" | awk '/Pages inactive/ {gsub(/\./,"",$3); print $3}')
+  SYS_FREE=$(( (${FREE_P:-0} + ${INACTIVE_P:-0}) * PAGE_SIZE / 1024 / 1024 ))
+  echo "│  System RAM:   ${SYS_TOTAL}MB total, ${SYS_FREE}MB available (free+inactive)"
+fi
+
+# Show current Claude Code memory (aggregate + per-process)
 if command -v pgrep &>/dev/null; then
-  CLAUDE_PIDS=$(pgrep -f "node.*claude" 2>/dev/null || true)
+  CLAUDE_PIDS=$(pgrep -x claude 2>/dev/null || true)
   if [[ -n "$CLAUDE_PIDS" ]]; then
-    echo "│  Running Claude sessions:"
+    AGG_RSS=0
+    SESSION_COUNT=0
+    echo "│  Claude sessions:"
     while IFS= read -r cpid; do
       [[ -z "$cpid" ]] && continue
       CRSS=$(ps -o rss= -p "$cpid" 2>/dev/null | tr -d ' ' || true)
       if [[ -n "$CRSS" ]]; then
         CRSS_MB=$(( CRSS / 1024 ))
+        AGG_RSS=$(( AGG_RSS + CRSS ))
+        SESSION_COUNT=$(( SESSION_COUNT + 1 ))
         echo "│    PID ${cpid}: ${CRSS_MB}MB RSS"
       fi
     done <<< "$CLAUDE_PIDS"
+    AGG_MB=$(( AGG_RSS / 1024 ))
+    echo "│  Aggregate:    ${AGG_MB}MB across ${SESSION_COUNT} sessions"
+  else
+    echo "│  No Claude sessions running"
   fi
 fi
 
@@ -264,6 +292,27 @@ if grep -q "peon-watchdog" "${HOME}/.claude/settings.local.json" 2>/dev/null; th
   _pass "Hooks reference peon-watchdog.sh"
 else
   _warn "settings.local.json does not reference peon-watchdog.sh"
+fi
+
+# Check watchdog cron plist (periodic monitoring)
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if launchctl list com.peonnotify.watchdog-cron &>/dev/null; then
+    _pass "Watchdog cron loaded (every 60s)"
+  else
+    _warn "Watchdog cron not loaded — periodic monitoring disabled. Run install.sh."
+  fi
+fi
+
+# Show recent watchdog log activity
+if [[ -f "${PEON_LOG_DIR}/peon.log" ]]; then
+  WD_LOG_COUNT=$(grep -c '"watchdog\.' "${PEON_LOG_DIR}/peon.log" 2>/dev/null || echo 0)
+  WD_WARN_COUNT=$(grep -c '"watchdog\.warn\|"watchdog\.kill\|"watchdog\.system_critical\|"watchdog\.aggregate_kill\|"watchdog\.process_kill' "${PEON_LOG_DIR}/peon.log" 2>/dev/null || echo 0)
+  echo "│  Log activity: ${WD_LOG_COUNT} total events, ${WD_WARN_COUNT} warnings/kills"
+  if (( WD_LOG_COUNT == 0 )); then
+    _warn "Zero watchdog events in log — watchdog may not be firing"
+  else
+    _pass "Watchdog events present in log"
+  fi
 fi
 
 # ── N. Obsidian Integration ──────────────────────────────────────
@@ -308,7 +357,7 @@ fi
 
 # Check launchd plist
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  if launchctl list 2>/dev/null | grep -q "com.peonnotify.obsidian-cron"; then
+  if launchctl list com.peonnotify.obsidian-cron &>/dev/null; then
     _pass "Cron job loaded (daily 9am)"
   else
     _warn "Cron job not loaded (run install.sh to set up)"

@@ -536,10 +536,15 @@ ${feedback_context}${full_context}"
     return 0
   fi
 
-  # ── 8. Strip markdown fences if present ────────────────────────
-  # Models sometimes wrap JSON in ```json ... ``` despite instructions
-  if [[ "$trimmed_response" == '```'* ]]; then
-    trimmed_response=$(echo "$trimmed_response" | sed '1{/^```/d;}' | sed '${/^```/d;}')
+  # ── 8. Extract JSON from response ───────────────────────────────
+  # Models often wrap JSON in ```json ... ``` or add preamble text.
+  # Strategy: if response contains a fenced JSON block, extract it.
+  # Otherwise, try extracting from first { to last }.
+  if echo "$trimmed_response" | grep -q '```'; then
+    trimmed_response=$(echo "$trimmed_response" | sed -n '/^```/,/^```/p' | sed '1d;$d')
+  elif [[ "$trimmed_response" != "{"* ]]; then
+    # Response has preamble before JSON — extract from first { to end
+    trimmed_response=$(echo "$trimmed_response" | sed -n '/^{/,$p')
   fi
 
   # ── 9. Validate JSON (W-OBS-06, 3-layer) ──────────────────────
@@ -814,13 +819,23 @@ ${evidence}"
 # ── Route by Event ─────────────────────────────────────────────────
 case "$HOOK_EVENT" in
 
-  PostToolUse)
-    FILE_PATH=$(_obs_extract_file_path)
-    [[ -z "$FILE_PATH" ]] && exit 0
-    _obsidian_accumulate "$FILE_PATH" "$TOOL_NAME"
+  PostToolUse|Stop)
+    # Accumulate on both PostToolUse and Stop.
+    # Stop fires per-turn (not per-session), so flushing here would
+    # reset the manifest every turn, yielding scores of 1-3 (below threshold).
+    # We only accumulate here; flush happens on SessionEnd.
+    if [[ "$HOOK_EVENT" == "PostToolUse" ]]; then
+      FILE_PATH=$(_obs_extract_file_path)
+      [[ -z "$FILE_PATH" ]] && exit 0
+      _obsidian_accumulate "$FILE_PATH" "$TOOL_NAME"
+    fi
+    # Stop: nothing to do — manifest stays intact for SessionEnd
     ;;
 
-  Stop|SessionEnd)
+  SessionEnd)
+    # Flush the full session manifest (accumulated across all turns).
+    # Requires peon-claude wrapper (CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=10000)
+    # or CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS set in shell profile.
     MANIFEST=$(_obsidian_manifest_path)
     _obsidian_flush "$MANIFEST" "false"
     ;;

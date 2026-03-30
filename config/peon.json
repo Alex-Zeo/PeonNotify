@@ -76,8 +76,14 @@
 
   "watchdog": {
     "enabled": true,
-    "warn_mb": 800,
-    "kill_mb": 1200,
+    "warn_mb": 500,
+    "kill_mb": 800,
+    "total_warn_mb": 1500,
+    "total_kill_mb": 2500,
+    "system_free_mb_warn": 512,
+    "system_free_mb_kill": 256,
+    "include_children": true,
+    "cron_interval_sec": 60,
     "warn_sound": "me_not_that_kind_of_orc.mp3",
     "kill_sound": "peon_death.mp3",
     "warn_cooldown_sec": 300,

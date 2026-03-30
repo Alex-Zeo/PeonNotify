@@ -262,13 +262,14 @@ else
   _log "Install Obsidian and create a vault, or set vault_path in peon.json"
 fi
 
-# Install launchd plist (macOS only)
+# Install launchd plists (macOS only)
 if [[ "$(uname -s)" == "Darwin" ]]; then
+  # Obsidian cron (daily 9am)
   PLIST_SRC="${INSTALLER_DIR}/config/com.peonnotify.obsidian-cron.plist"
   PLIST_DST="$HOME/Library/LaunchAgents/com.peonnotify.obsidian-cron.plist"
   if [[ -f "$PLIST_SRC" ]]; then
     if $DRY_RUN; then
-      _log "[dry-run] Install launchd plist"
+      _log "[dry-run] Install obsidian cron plist"
     else
       # Read cron_hour from config
       CRON_HOUR=9
@@ -279,7 +280,27 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
       sed "s|\$HOME|${HOME}|g; s|<integer>9</integer>|<integer>${CRON_HOUR}</integer>|g" "$PLIST_SRC" > "$PLIST_DST"
       launchctl unload "$PLIST_DST" 2>/dev/null || true
       launchctl load "$PLIST_DST" 2>/dev/null || true
-      _ok "LaunchAgent installed (daily 9am cron)"
+      _ok "Obsidian LaunchAgent installed (daily 9am cron)"
+    fi
+  fi
+
+  # Watchdog cron (every 60s — periodic memory monitoring)
+  WD_PLIST_SRC="${INSTALLER_DIR}/config/com.peonnotify.watchdog-cron.plist"
+  WD_PLIST_DST="$HOME/Library/LaunchAgents/com.peonnotify.watchdog-cron.plist"
+  if [[ -f "$WD_PLIST_SRC" ]]; then
+    if $DRY_RUN; then
+      _log "[dry-run] Install watchdog cron plist"
+    else
+      # Read interval from config
+      WD_INTERVAL=60
+      if command -v jq &>/dev/null && [[ -f "${TARGET_DIR}/config/peon.json" ]]; then
+        _interval=$(jq -r '.watchdog.cron_interval_sec // 60' "${TARGET_DIR}/config/peon.json" 2>/dev/null)
+        [[ "$_interval" =~ ^[0-9]+$ ]] && WD_INTERVAL="$_interval"
+      fi
+      sed "s|\$HOME|${HOME}|g; s|<integer>60</integer>|<integer>${WD_INTERVAL}</integer>|g" "$WD_PLIST_SRC" > "$WD_PLIST_DST"
+      launchctl unload "$WD_PLIST_DST" 2>/dev/null || true
+      launchctl load "$WD_PLIST_DST" 2>/dev/null || true
+      _ok "Watchdog LaunchAgent installed (every ${WD_INTERVAL}s)"
     fi
   fi
 fi
